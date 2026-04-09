@@ -8,14 +8,24 @@ services:
       - "6333:6333"
     volumes:
       - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   # Observabilidad
   phoenix:
     image: arizeai/phoenix:latest
     ports:
       - "6006:6006"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6006/v1/traces"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # Novedad: Base de Datos Relacional para Historial de Chat
+  # Base de Datos Relacional para Historial de Chat
   postgres:
     image: postgres:15-alpine
     ports:
@@ -26,6 +36,11 @@ services:
       - POSTGRES_DB=chat_history
     volumes:
       - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentx -d chat_history"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   # Nuestra Aplicación Streamlit
   app:
@@ -35,12 +50,15 @@ services:
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:6006/v1/traces
-      # Pasamos la URL de conexión a la app
       - DATABASE_URL=postgresql://agentx:supersecret@postgres:5432/chat_history
+      - QDRANT_URL=http://qdrant:6333
     depends_on:
-      - qdrant
-      - phoenix
-      - postgres # La app ahora debe esperar a que BD relacional levante
+      qdrant:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      phoenix:
+        condition: service_healthy
 
 volumes:
   qdrant_data:

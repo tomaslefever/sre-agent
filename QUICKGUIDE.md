@@ -10,27 +10,36 @@ Follow these simple steps to run and test the application locally. The entire ap
 
 #### 1. Clone the repository
 ```bash
-git clone [https://github.com/TU_USUARIO/mi-repo-agentx.git](https://github.com/TU_USUARIO/mi-repo-agentx.git)
-cd mi-repo-agentx
+git clone https://github.com/tomaslefever/sre-agent.git
+cd sre-agent
 ```
 
 #### 2. Set up environment variables
 Copy the example environment file and add your actual API keys.
 ```bash
-cp .env.example .env
+cp env.example .env
 ```
 *Open the `.env` file and replace the placeholder with your real OpenAI API Key.*
 
-#### 3. Build and Run the Application
-Start the entire stack (UI, Vector DB, Relational DB, and Observability) using Docker Compose:
+#### 3. Build and Run (Local or Cloud)
+
+##### Local Deployment
+To run the entire infrastructure locally:
 ```bash
 docker compose up --build
 ```
 
-#### 4. Access the Services
-Once the containers are running, you can access the following interfaces in your browser:
-* **Agent UI (Streamlit):** [http://localhost:8501](http://localhost:8501)
-* **Observability Dashboard (Phoenix):** [http://localhost:6006](http://localhost:6006)
-* **Vector DB (Qdrant - API):** [http://localhost:6333](http://localhost:6333)
+##### Cloud Deployment (Easypanel / Railway / etc.)
+Does **NOT** deploy as individual Apps. Instead, use the **Stack** or **Project** feature:
+1. Create a new **Stack**.
+2. Paste the contents of `docker-compose.yml`.
+3. Set the `OPENAI_API_KEY` in the environment variables of the Stack.
+4. Deploy. This ensures all services (Qdrant, Postgres, Phoenix) are linked and healthy.
 
-**How to test the agent:** Ask a question about company knowledge (e.g., *"What is Qdrant?"*) or ask to create a support ticket (e.g., *"I need human help, please open a ticket"*). Try refreshing the page to see how PostgreSQL persists your chat history!
+#### 4. Access the Services
+Once everything is ready:
+* **Agent UI:** [http://localhost:8501](http://localhost:8501)
+* **Observability:** [http://localhost:6006](http://localhost:6006)
+* **Vector DB:** [http://localhost:6333](http://localhost:6333)
+
+**Important:** The `app` service now includes healthchecks. If you see it "starting", wait a few moments until the databases are "healthy" before trying to use the chat.
