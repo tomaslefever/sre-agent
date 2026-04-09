@@ -8,6 +8,8 @@ services:
   # Observabilidad
   phoenix:
     image: arizephoenix/phoenix:latest
+    ports:
+      - "6006:6006"
 
   # Base de Datos Relacional para Historial de Chat
   postgres:
@@ -29,6 +31,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    ports:
+      - "8501:8501"
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:6006/v1/traces
