@@ -5,7 +5,7 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      test: [ "CMD", "curl", "-f", "http://localhost:6333/healthz" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -16,7 +16,7 @@ services:
     ports:
       - "6006:6006"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6006/v1/traces"]
+      test: [ "CMD", "curl", "-f", "http://localhost:6006/v1/traces" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -31,14 +31,16 @@ services:
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U agentx -d chat_history"]
+      test: [ "CMD-SHELL", "pg_isready -U agentx -d chat_history" ]
       interval: 5s
       timeout: 5s
       retries: 5
 
   # Nuestra Aplicación Streamlit
   app:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "8501:8501"
     environment:
