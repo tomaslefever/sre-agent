@@ -12,7 +12,7 @@ services:
 
   # Observabilidad
   phoenix:
-    image: arizeai/phoenix:latest
+    image: arizephoenix/phoenix:latest
     ports:
       - "6006:6006"
     healthcheck:
