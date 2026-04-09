@@ -1,6 +1,6 @@
 services:
   # Base de Datos Vectorial
-  qdrant:
+  qdrant-db:
     image: qdrant/qdrant:latest
     volumes:
       - qdrant_data:/qdrant/storage
@@ -45,9 +45,9 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:6006/v1/traces
       - DATABASE_URL=postgresql://agentx:supersecret@postgres:5432/chat_history
-      - QDRANT_URL=http://qdrant:6333
+      - QDRANT_URL=http://qdrant-db:6333
     depends_on:
-      qdrant:
+      qdrant-db:
         condition: service_healthy
       postgres:
         condition: service_healthy

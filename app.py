@@ -38,7 +38,18 @@ def init_observability():
 
 @st.cache_resource
 def init_qdrant_and_embeddings():
-    qdrant_url = os.getenv("QDRANT_URL", "http://qdrant:6333")
+    qdrant_url = os.getenv("QDRANT_URL", "http://qdrant-db:6333")
+    # --- DIAGNÓSTICO DE RED ---
+    with st.expander("🛠️ Diagnóstico de Conexión (Debug)"):
+        st.write(f"URL configurada: `{qdrant_url}`")
+        try:
+            import socket
+            hostname = qdrant_url.split("//")[-1].split(":")[0]
+            ip = socket.gethostbyname(hostname)
+            st.success(f"Host `{hostname}` resuelto a IP: `{ip}`")
+        except Exception as e:
+            st.error(f"No se pudo resolver el host `{hostname}`: {e}")
+    # --------------------------
     try:
         embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
         st.info(f"Conectando a Qdrant en: `{qdrant_url}`")
