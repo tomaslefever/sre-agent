@@ -102,7 +102,9 @@ tools = [buscar_conocimiento, crear_ticket_sre]
 # ==========================================
 # 3. CEREBRO DEL AGENTE
 # ==========================================
-llm = ChatOpenAI(model="gpt-4o", temperature=0)
+# Permitir que el modelo se configure por variable de entorno para usar modelos más potentes/nuevos 
+modelo_llm = os.getenv("OPENAI_MODEL", "gpt-4o")
+llm = ChatOpenAI(model=modelo_llm, temperature=0)
 prompt = ChatPromptTemplate.from_messages([
     ("system", f"Eres un Agente SRE experto. Administras incidencias y tickets. Técnicos disponibles: {', '.join(TECNICOS)}."),
     ("placeholder", "{chat_history}"),
