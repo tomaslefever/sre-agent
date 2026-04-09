@@ -8,7 +8,8 @@ from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams
-from langchain.agents import AgentExecutor, create_tool_calling_agent
+from langchain.agents import create_tool_calling_agent
+from langchain.agents.agent_executor import AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.tools import tool
 
