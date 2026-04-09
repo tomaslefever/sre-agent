@@ -5,8 +5,8 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:6333/healthz" ]
-      interval: 5s
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:6333/healthz || exit 1"]
+      interval: 10s
       timeout: 5s
       retries: 5
 
@@ -16,7 +16,7 @@ services:
     ports:
       - "6006:6006"
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:6006/v1/traces" ]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:6006/ || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -38,9 +38,7 @@ services:
 
   # Nuestra Aplicación Streamlit
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: .
     ports:
       - "8501:8501"
     environment:
