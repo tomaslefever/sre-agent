@@ -120,89 +120,93 @@ agent_with_memory = RunnableWithMessageHistory(
 )
 
 # ==========================================
-# 4. INTERFAZ: SIDEBAR Y DASHBOARD
+# 4. INTERFAZ: SIDEBAR Y NAVEGACIÓN
 # ==========================================
 with st.sidebar:
     st.header("SRE Control Center")
-    tab_chat, tab_tickets = st.tabs(["💬 Chat", "🎫 Tickets"])
     
-    with tab_chat:
-        st.subheader("Sesiones")
-        if st.button("+ Nueva Sesión"):
-            new_id = str(uuid.uuid4()); st.session_state.session_list.append(new_id)
-            st.session_state.session_id = new_id; st.rerun()
-        
-        st.session_state.session_id = st.selectbox("Historial", st.session_state.session_list, 
-                                                  index=st.session_state.session_list.index(st.session_state.session_id))
-        st.markdown("---")
-        st.subheader("Adjuntos")
-        up_file = st.file_uploader("Evidencia (Logs/Img)", type=["txt", "log", "png", "jpg"])
-        if up_file:
-            st.session_state.last_upload = {"name": up_file.name, "type": up_file.type}
-
-    with tab_tickets:
-        st.subheader("Estado del Sistema")
-        db = SessionLocal()
-        tickets_df = pd.read_sql(db.query(Ticket).statement, engine)
-        db.close()
-        if not tickets_df.empty:
-            st.dataframe(tickets_df[["id", "status", "assigned_to"]], hide_index=True)
-        else:
-            st.write("No hay tickets activos.")
+    seccion = st.radio("Navegación", ["Centro de Incidentes", "Tablero de Tickets"])
+    
+    st.markdown("---")
+    
+    st.subheader("Sesiones")
+    if st.button("+ Nueva Sesión", use_container_width=True):
+        new_id = str(uuid.uuid4()); st.session_state.session_list.append(new_id)
+        st.session_state.session_id = new_id; st.rerun()
+    
+    st.session_state.session_id = st.selectbox("Historial de conversaciones", st.session_state.session_list, 
+                                              label_visibility="collapsed",
+                                              index=st.session_state.session_list.index(st.session_state.session_id))
 
 # ==========================================
 # 5. VISTA PRINCIPAL
 # ==========================================
 st.title("AgentX: SRE Intelligence Platform")
 
-# Tabs principales
-t1, t2 = st.tabs(["🤖 Centro de Incidentes", "📊 Tablero de Tickets"])
-
-with t1:
+if seccion == "Centro de Incidentes":
+    # Mostrar historial del chat
     h = get_chat_history(st.session_state.session_id)
     for m in h.messages:
         role = "user" if m.type == "human" else "assistant"
         with st.chat_message(role): st.markdown(m.content)
 
+    # Componente para adjuntar archivos (multimodal)
+    with st.container():
+        up_file = st.file_uploader("Adjuntar Evidencia (Logs / Imágenes / Videos)", type=["txt", "log", "png", "jpg", "jpeg", "mp4"])
+        if up_file:
+            st.session_state.last_upload = {"name": up_file.name, "type": up_file.type}
+            
+    # Input y procesamiento del chat
     if u_input := st.chat_input("Diagnostica un fallo o solicita un ticket..."):
         ctx = ""
         if up_file:
             if up_file.name.endswith((".log", ".txt")):
-                ctx = f"\n\n[ARCHIVO: {up_file.name}]\n{up_file.read().decode()}"
+                ctx = f"\n\n[ARCHIVO ADJUNTO: {up_file.name}]\n{up_file.read().decode()}"
             else:
-                ctx = f"\n\n[IMAGEN ADJUNTA: {up_file.name}]"
+                ctx = f"\n\n[MULTIMEDIA ADJUNTA: {up_file.name}]"
         
-        with st.chat_message("user"): st.markdown(u_input + (ctx if len(ctx) < 500 else "\n[Log extenso adjunto]"))
+        with st.chat_message("user"): 
+            st.markdown(u_input + (ctx if len(ctx) < 500 else f"\n\n📎 *{up_file.name} adjuntado*"))
         
         with st.chat_message("assistant"):
-            with st.spinner("Analizando y procesando incidente..."):
+            with st.spinner("Analizando evidencia e infraestructura..."):
                 res = agent_with_memory.invoke(
                     {"input": u_input + ctx},
                     config={"configurable": {"session_id": st.session_state.session_id}}
                 )
                 st.markdown(res["output"])
 
-with t2:
-    st.header("🎫 Sistema de Gestión de Tickets (SRE)")
+elif seccion == "Tablero de Tickets":
+    st.header("Sistema de Gestión de Tickets")
     db = SessionLocal()
+    
+    tickets_df = pd.read_sql(db.query(Ticket).statement, engine)
+    if not tickets_df.empty:
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Tickets Abiertos", len(tickets_df[tickets_df['status'] == 'Abierto']))
+        c2.metric("Tickets Totales", len(tickets_df))
+        c3.metric("Técnicos Activos", len(tickets_df['assigned_to'].unique()))
+        st.markdown("---")
+        
     all_t = db.query(Ticket).all()
     
     if all_t:
         for t in all_t:
-            with st.expander(f"{t.id} - {t.report[:50]}..."):
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Autor", t.author)
-                c2.metric("Asignado", t.assigned_to)
-                c3.metric("Estado", t.status)
-                st.write("**Reporte Completo:**")
-                st.write(t.report)
+            with st.expander(f"{t.id} - {t.report[:80]}..."):
+                cols = st.columns(3)
+                cols[0].metric("Autor", t.author)
+                cols[1].metric("Asignado a", t.assigned_to)
+                cols[2].metric("Estado", t.status)
                 
-                # Mostrar adjuntos
+                st.write("**Reporte de Incidente:**")
+                st.info(t.report)
+                
+                # Mostrar adjuntos si los hay
                 atts = db.query(Attachment).filter_by(ticket_id=t.id).all()
                 if atts:
-                    st.write("**Adjuntos:**")
+                    st.write("**Adjuntos guardados en el ticket:**")
                     for a in atts:
-                        st.caption(f"📎 {a.filename} ({a.file_type})")
+                        st.markdown(f"📎 `{a.filename}` ({a.file_type})")
     else:
-        st.info("El tablero está vacío. Pide al agente que cree un ticket para empezar.")
+        st.info("El tablero está vacío. Puedes pedir al agente que registre un incidente.")
     db.close()
