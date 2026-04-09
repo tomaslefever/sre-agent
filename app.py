@@ -46,6 +46,12 @@ class Attachment(Base):
     filename = Column(String)
     file_type = Column(String)
 
+class Repository(Base):
+    __tablename__ = "repositories"
+    id = Column(String, primary_key=True)
+    url = Column(String)
+    last_updated = Column(DateTime)
+
 Base.metadata.create_all(engine)
 
 # Migración en caliente para evitar caída si la tabla ya existe sin estas columnas
@@ -53,6 +59,7 @@ try:
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS veredicto TEXT;"))
         conn.execute(text("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS planes_accion JSON DEFAULT '[]'::json;"))
+        conn.execute(text("CREATE TABLE IF NOT EXISTS repositories (id TEXT PRIMARY KEY, url TEXT, last_updated TIMESTAMP);"))
 except Exception:
     pass
 
@@ -258,6 +265,8 @@ with st.sidebar:
         st.session_state.seccion = "Centro de Incidentes"
     if st.button("📊 Tablero de Tickets", use_container_width=True):
         st.session_state.seccion = "Tablero de Tickets"
+    if st.button("📚 Base de Conocimiento", use_container_width=True):
+        st.session_state.seccion = "Base de Conocimiento"
     
     st.markdown("---")
     
@@ -439,4 +448,61 @@ elif st.session_state.seccion == "Tablero de Tickets":
                         st.markdown(f"📎 `{a.filename}` ({a.file_type})")
     else:
         st.info("El tablero está vacío. Puedes pedir al agente que registre un incidente.")
+    db.close()
+
+elif st.session_state.seccion == "Base de Conocimiento":
+    st.header("Base de Conocimiento e Integración GitHub")
+    st.markdown("Agrega repositorios de código o documentación para que el Agente los incluya en su memoria (RAG).")
+    
+    db = SessionLocal()
+    
+    c1, c2 = st.columns([2, 1])
+    with c1:
+        st.subheader("Conectar Repositorio GitHub")
+        nuevo_repo = st.text_input("URL del Repositorio (ej: https://github.com/facebook/react)")
+        if st.button("Agregar a la Base de Conocimientos"):
+            if "github.com/" in nuevo_repo:
+                from scraper import sync_github_repo
+                with st.spinner("Descargando e indexando archivos del repositorio..."):
+                    res = sync_github_repo(nuevo_repo)
+                    if res.get("status") == "ok":
+                        # Añadir a la lista
+                        nr = Repository(id=str(uuid.uuid4()), url=nuevo_repo, last_updated=datetime.utcnow())
+                        db.add(nr)
+                        db.commit()
+                        st.success(f"¡Éxito! Se rastrearon y vectorizaron {res.get('docs_indexed', 0)} archivos de código/doc en Qdrant.")
+                    else:
+                        st.error(f"Error accediendo a GitHub: {res.get('message')}. Asegúrate de que la variable de entorno GITHUB_TOKEN esté configurada.")
+            else:
+                st.warning("Escribe una URL válida de Github.")
+    
+    with c2:
+        st.info("💡 **Webhooks de Sincronización Automática**\n\nPara que los repositorios se actualicen automáticamente cuando existan nuevos 'pushes', ve a `Settings > Webhooks` en GitHub y configura la siguiente URL:")
+        st.code("http://<TU_IP_O_DOMINIO>:8000/webhook/github", language="text")
+        st.caption("Content-Type: application/json")
+
+    st.markdown("---")
+    st.subheader("Repositorios Sincronizados")
+    
+    repos = db.query(Repository).all()
+    if repos:
+        for r in repos:
+            rc1, rc2, rc3 = st.columns([3, 2, 1])
+            rc1.markdown(f"📦 **{r.url}**")
+            rc2.caption(f"Última sync: {r.last_updated.strftime('%Y-%m-%d %H:%M')}")
+            with rc3:
+                if st.button("🔄 Actualizar", key=f"repo_upd_{r.id}"):
+                    from scraper import sync_github_repo
+                    with st.spinner("Re-descargando repositorio..."):
+                        r_res = sync_github_repo(r.url)
+                        if r_res.get("status") == "ok":
+                            r.last_updated = datetime.utcnow()
+                            db.commit()
+                            st.toast(f"✅ Repositorio {r.url} actualizado en Qdrant ({r_res.get('docs_indexed', 0)} archivos).")
+                            st.rerun()
+                        else:
+                            st.error("Fallo durante la sincronización.")
+    else:
+        st.write("Ningún repositorio conectado todavía.")
+    
     db.close()

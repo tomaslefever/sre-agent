@@ -10,3 +10,6 @@ streamlit
 psycopg2-binary
 SQLAlchemy
 pandas
+requests
+fastapi
+uvicorn
