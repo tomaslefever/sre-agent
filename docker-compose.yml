@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  # Base de Datos Vectorial
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  # Observabilidad
+  phoenix:
+    image: arizeai/phoenix:latest
+    ports:
+      - "6006:6006"
+
+  # Novedad: Base de Datos Relacional para Historial de Chat
+  postgres:
+    image: postgres:15-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=agentx
+      - POSTGRES_PASSWORD=supersecret
+      - POSTGRES_DB=chat_history
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+  # Nuestra Aplicación Streamlit
+  app:
+    build: .
+    ports:
+      - "8501:8501"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:6006/v1/traces
+      # Pasamos la URL de conexión a la app
+      - DATABASE_URL=postgresql://agentx:supersecret@postgres:5432/chat_history
+    depends_on:
+      - qdrant
+      - phoenix
+      - postgres # La app ahora debe esperar a que BD relacional levante
+
+volumes:
+  qdrant_data:
+  pg_data:
