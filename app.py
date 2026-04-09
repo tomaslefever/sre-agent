@@ -65,13 +65,13 @@ if "session_list" not in st.session_state:
 # ==========================================
 @tool
 def buscar_conocimiento(query: str) -> str:
-    """Busca soluciones técnicas en la base de datos vectorial."""
-    qdrant_url = os.getenv("QDRANT_URL", "http://qdrant-db:6333")
-    client = QdrantClient(url=qdrant_url)
-    embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-    vector_store = QdrantVectorStore(client=client, collection_name="kb_sre", embedding=embeddings)
-    docs = vector_store.as_retriever().invoke(query)
-    return "\n\n".join([d.page_content for d in docs]) if docs else "No hay info."
+    """Importante: Usa esto para buscar cualquier error en los archivos '.log' subidos, síntomas o manuales de infraestructura."""
+    docs = vector_store.as_retriever(search_kwargs={"k": 5}).invoke(query)
+    resultados = []
+    for d in docs:
+        origen = d.metadata.get("source", "kb_general")
+        resultados.append(f"[{origen}]: {d.page_content}")
+    return "\n\n---\n\n".join(resultados) if resultados else "No se encontró coincidencia."
 
 @tool
 def crear_ticket_sre(reporte: str, autor: str, asignado: str = None) -> str:
@@ -161,12 +161,21 @@ if seccion == "Centro de Incidentes":
         ctx = ""
         if up_file:
             if up_file.name.endswith((".log", ".txt")):
+                from langchain_text_splitters import RecursiveCharacterTextSplitter
+                from langchain_core.documents import Document
+                
                 file_content = up_file.read().decode(errors='replace')
-                # Para evitar exceder los límites de tokens de OpenAI, 
-                # truncamos logs masivos y nos quedamos con los últimos incidentes (final del archivo).
-                if len(file_content) > 30000:
-                    file_content = "...[INFORMACIÓN ACOTADA POR LÍMITE DE TAMAÑO - MOSTRANDO ÚLTIMAS LÍNEAS]...\n" + file_content[-30000:]
-                ctx = f"\n\n[ARCHIVO ADJUNTO: {up_file.name}]\n{file_content}"
+                # 1. Separamos el log gigante en fracciones navegables (Chunks)
+                text_splitter = RecursiveCharacterTextSplitter(chunk_size=1200, chunk_overlap=150)
+                chunks = text_splitter.split_text(file_content)
+                docs = [Document(page_content=c, metadata={"source": up_file.name}) for c in chunks]
+                
+                # 2. Ingesta a Qdrant (Base de datos vectorial)
+                with st.spinner(f"Indexando archivo gigante de {len(chunks)} fragmentos en Qdrant..."):
+                    vector_store.add_documents(docs)
+                
+                # 3. Informamos a GPT-4o de que el dato está en su memoria y debe buscarlo.
+                ctx = f"\n\n[SISTEMA: El usuario ha adjuntado el archivo log '{up_file.name}'. No está en este prompt. En su lugar, ha sido indexado en tu base vectorial (Qdrant). Usa de forma obligatoria tu herramienta 'buscar_conocimiento' para leer sus partes y responder a la pregunta del usuario.]"
             else:
                 ctx = f"\n\n[MULTIMEDIA ADJUNTA: {up_file.name}]"
         
