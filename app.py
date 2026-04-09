@@ -102,20 +102,28 @@ def crear_ticket_sre(reporte: str, autor: str, asignado: str = None) -> str:
     
     t_id = f"TCK-{uuid.uuid4().hex[:6].upper()}"
     db = SessionLocal()
-    new_ticket = Ticket(id=t_id, report=reporte, author=autor, assigned_to=asignado)
-    db.add(new_ticket)
-    
-    # Vincular archivo si hay uno en el estado temporal
-    if "last_upload" in st.session_state and st.session_state.last_upload:
-        att = Attachment(id=str(uuid.uuid4()), ticket_id=t_id, 
-                         filename=st.session_state.last_upload["name"],
-                         file_type=st.session_state.last_upload["type"])
-        db.add(att)
-        st.session_state.last_upload = None
+    try:
+        new_ticket = Ticket(id=t_id, report=reporte, author=autor, assigned_to=asignado)
+        db.add(new_ticket)
+        db.flush() # Fuerza el INSERT del ticket ANTES del attachment para evitar errores ForeignKey
+        
+        # Vincular archivo si hay uno en el estado temporal
+        if "last_upload" in st.session_state and st.session_state.last_upload:
+            att = Attachment(id=str(uuid.uuid4()), ticket_id=t_id, 
+                             filename=st.session_state.last_upload["name"],
+                             file_type=st.session_state.last_upload["type"])
+            db.add(att)
+            st.session_state.last_upload = None
 
-    db.commit()
-    db.close()
-    return f"✅ Ticket {t_id} creado y asignado a {asignado}. El incidente ha sido registrado."
+        db.commit()
+        res = f"✅ Ticket {t_id} creado y asignado a {asignado}. El incidente ha sido registrado."
+    except Exception as e:
+        db.rollback()
+        res = f"❌ Error al crear el ticket: {str(e)}"
+    finally:
+        db.close()
+    
+    return res
 
 @tool
 def asignar_ticket(ticket_id: str, tecnico: str) -> str:
