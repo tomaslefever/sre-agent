@@ -4,22 +4,12 @@ services:
     image: qdrant/qdrant:latest
     volumes:
       - qdrant_data:/qdrant/storage
-    healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:6333/healthz || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
   # Observabilidad
   phoenix:
     image: arizephoenix/phoenix:latest
     ports:
       - "6006:6006"
-    healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:6006/ || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
   # Base de Datos Relacional para Historial de Chat
   postgres:
@@ -47,12 +37,9 @@ services:
       - DATABASE_URL=postgresql://agentx:supersecret@postgres:5432/chat_history
       - QDRANT_URL=http://qdrant-db:6333
     depends_on:
-      qdrant-db:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-      phoenix:
-        condition: service_healthy
+      - qdrant-db
+      - postgres
+      - phoenix
 
 volumes:
   qdrant_data:
