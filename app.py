@@ -91,7 +91,15 @@ tools = [buscar_en_base_de_conocimiento, crear_ticket_soporte]
 # 3. CONFIGURACIÓN DEL AGENTE Y MEMORIA EN POSTGRESQL
 # ==========================================
 prompt = ChatPromptTemplate.from_messages([
-    ("system", "Eres un asistente de IA útil e inteligente. Tienes acceso a herramientas para buscar información y crear tickets. Si no sabes algo, usa tus herramientas."),
+    ("system", """Eres un Ingeniero de Fiabilidad de Sitios (SRE) experto y proactivo. 
+    Tu objetivo es ayudar a minimizar el tiempo de resolución de incidentes (MTTR).
+    
+    Capacidades:
+    1. Buscar en la base de conocimientos manuales técnicos y runbooks.
+    2. Crear tickets de soporte con prioridad clara basada en el impacto.
+    3. Analizar síntomas de fallos en infraestructura.
+    
+    Personalidad: Profesional, analítico y centrado en la resolución. Si detectas un problema crítico, sugiere siempre crear un ticket."""),
     ("placeholder", "{chat_history}"),
     ("human", "{input}"),
     ("placeholder", "{agent_scratchpad}"),
@@ -118,31 +126,96 @@ agent_with_chat_history = RunnableWithMessageHistory(
 # ==========================================
 # 4. INTERFAZ DE USUARIO (STREAMLIT)
 # ==========================================
-st.title("🤖 Asistente AgentX")
-st.markdown("Agente inteligente con memoria persistente (PostgreSQL).")
 
-# Generar un ID de sesión único si es un usuario nuevo (o podrías pedirle un username)
+# Configuración de página
+st.set_page_config(page_title="SRE AgentX | Hackathon Edition", page_icon="🤖", layout="wide")
+
+# Estilo personalizado para el Sidebar
+st.markdown("""
+<style>
+    [data-testid="stSidebar"] {
+        background-color: #0e1117;
+        border-right: 1px solid #30363d;
+    }
+    .stStatusWidget {
+        background-color: #161b22;
+        border-radius: 10px;
+        padding: 10px;
+        margin-bottom: 10px;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# --- SIDEBAR ---
+with st.sidebar:
+    st.image("https://cdn-icons-png.flaticon.com/512/2040/2040523.png", width=80)
+    st.title("SRE Control Panel")
+    st.markdown("---")
+    
+    st.subheader("🌐 Infrastructure Health")
+    cols = st.columns(3)
+    with cols[0]: st.write("🧠 Qdrant"); st.caption("✅ Online")
+    with cols[1]: st.write("🐘 Postgres"); st.caption("✅ Online")
+    with cols[2]: st.write("🔥 Phoenix"); st.caption("✅ Online")
+    
+    st.markdown("---")
+    st.subheader("🚀 Quick Actions")
+    if st.button("Simular Alerta de Latencia"):
+        st.session_state.simulate_alert = "ALERTA: Latencia > 500ms en el microservicio de Pagos."
+    
+    st.markdown("---")
+    st.info("""
+    **Objetivo del Agente:**
+    Analizar incidentes, consultar bases de conocimiento y automatizar la creación de tickets de soporte para reducir el MTTR (Mean Time To Recovery).
+    """)
+
+# --- MAIN UI ---
+st.title("🤖 SRE Agente Inteligente")
+st.markdown("""
+Bienvenido al **Centro de Comando de Incidentes**. Soy tu Agente SRE, entrenado para administrar tickets y resolver dudas de infraestructura.
+""")
+
+# Generar un ID de sesión único
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
 
-# Cargar el historial desde PostgreSQL para mostrarlo en la pantalla
+# Cargar el historial desde PostgreSQL
 history = get_session_history(st.session_state.session_id)
 
+# Mensaje de bienvenida si el historial está vacío
+if len(history.messages) == 0:
+    with st.chat_message("assistant"):
+        st.markdown("""
+        ¡Hola! Soy tu **SRE AgentX**. Estoy listo para ayudarte con el Hackathon. 
+        Puedo asistirte en:
+        *   🔍 **Consultar Runbooks**: Busco en la base de datos vectorial (Qdrant).
+        *   🎫 **Gestionar Tickets**: Puedo crear registros de incidencia de forma autónoma.
+        *   📊 **Análisis de Trazas**: Todo lo que hagamos está siendo monitoreado en Phoenix.
+        
+        ¿Qué incidente estamos analizando hoy?
+        """)
+
+# Mostrar historial
 for msg in history.messages:
     role = "user" if msg.type == "human" else "assistant"
     with st.chat_message(role):
         st.markdown(msg.content)
 
-# Entrada de nuevo mensaje
-if prompt_usuario := st.chat_input("Escribe tu mensaje aquí..."):
+# Lógica de entrada de mensajes
+if prompt_usuario := st.chat_input("Describe el incidente o pide crear un ticket..."):
+    # Si hay una alerta simulada, la adjuntamos al mensaje de forma interna
+    input_final = prompt_usuario
+    if "simulate_alert" in st.session_state:
+        input_final = f"{st.session_state.simulate_alert}\n\nUsuario dice: {prompt_usuario}"
+        del st.session_state.simulate_alert
+
     with st.chat_message("user"):
         st.markdown(prompt_usuario)
 
     with st.chat_message("assistant"):
-        with st.spinner("Pensando..."):
-            # Al invocar, el historial se lee de Postgres, se envía a OpenAI y se guarda de vuelta automáticamente
+        with st.spinner("Analizando infraestructura y consultando bases..."):
             respuesta = agent_with_chat_history.invoke(
-                {"input": prompt_usuario},
+                {"input": input_final},
                 config={"configurable": {"session_id": st.session_state.session_id}}
             )
-            st.markdown(respuesta["output"])
+            st.markdown(respuesta["output"])
