@@ -38,7 +38,7 @@ def init_observability():
 
 @st.cache_resource
 def init_qdrant_and_embeddings():
-    qdrant_url = os.getenv("QDRANT_URL", "http://qdrant-db:6333")
+    qdrant_url = os.getenv("QDRANT_URL", "http://qdrant:6333")
     try:
         embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
         st.info(f"Conectando a Qdrant en: `{qdrant_url}`")
