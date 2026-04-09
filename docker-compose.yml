@@ -4,8 +4,6 @@ services:
   # Base de Datos Vectorial
   sre_qdrant:
     image: qdrant/qdrant:latest
-    ports:
-      - "6333:6333"
     volumes:
       - qdrant_data:/qdrant/storage
     healthcheck:
@@ -28,8 +26,6 @@ services:
   # Base de Datos Relacional para Historial de Chat
   sre_postgres:
     image: postgres:15-alpine
-    ports:
-      - "5432:5432"
     environment:
       - POSTGRES_USER=agentx
       - POSTGRES_PASSWORD=supersecret

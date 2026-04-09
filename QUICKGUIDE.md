@@ -17,7 +17,7 @@ cd sre-agent
 #### 2. Set up environment variables
 Copy the example environment file and add your actual API keys.
 ```bash
-cp env.example .env
+cp .env.example .env
 ```
 *Open the `.env` file and replace the placeholder with your real OpenAI API Key.*
 
@@ -40,6 +40,5 @@ Does **NOT** deploy as individual Apps. Instead, use the **Stack** or **Project*
 Once everything is ready:
 * **Agent UI:** [http://localhost:8501](http://localhost:8501)
 * **Observability:** [http://localhost:6006](http://localhost:6006)
-* **Vector DB:** [http://localhost:6333](http://localhost:6333)
 
 **Important:** The `app` service now includes healthchecks. If you see it "starting", wait a few moments until the databases are "healthy" before trying to use the chat.

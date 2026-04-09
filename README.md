@@ -29,7 +29,7 @@ An intelligent agent designed for SRE tasks and technical support, featuring per
 
 ## 🏁 Quick Start
 
-1. Create your `.env` file based on `env.example`.
+1. Create your `.env` file based on `.env.example`.
 2. Run `docker compose up --build`.
 3. Open [http://localhost:8501](http://localhost:8501).
 
@@ -66,7 +66,7 @@ Un agente inteligente diseñado para tareas de SRE y soporte técnico, con memor
 
 ## 🏁 Inicio Rápido
 
-1. Crea tu archivo `.env` basado en `env.example`.
+1. Crea tu archivo `.env` basado en `.env.example`.
 2. Ejecuta `docker compose up --build`.
 3. Abre [http://localhost:8501](http://localhost:8501).
 
