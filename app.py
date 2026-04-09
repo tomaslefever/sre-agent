@@ -23,24 +23,36 @@ from langchain_core.runnables.history import RunnableWithMessageHistory
 # ==========================================
 # 1. INICIALIZACIÓN DE SERVICIOS
 # ==========================================
+if "OPENAI_API_KEY" not in os.environ:
+    st.error("⚠️ No se encontró la variable de entorno `OPENAI_API_KEY`. Por favor, configúrala en el panel de control (Easypanel) para continuar.")
+    st.stop()
+
 @st.cache_resource
 def init_observability():
-    os.environ["PHOENIX_COLLECTOR_ENDPOINT"] = "http://phoenix:6006/v1/traces"
-    LangChainInstrumentor().instrument()
+    os.environ["PHOENIX_COLLECTOR_ENDPOINT"] = os.getenv("PHOENIX_COLLECTOR_ENDPOINT", "http://phoenix:6006/v1/traces")
+    try:
+        LangChainInstrumentor().instrument()
+    except Exception as e:
+        st.warning(f"No se pudo inicializar la observabilidad: {e}")
     return True
 
 @st.cache_resource
 def init_qdrant_and_embeddings():
-    embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-    client = QdrantClient(url="http://qdrant:6333") 
-    
-    if not client.collection_exists("mis_documentos"):
-        client.create_collection(
-            collection_name="mis_documentos",
-            vectors_config=VectorParams(size=1536, distance=Distance.COSINE),
-        )
-
-    return QdrantVectorStore(client=client, collection_name="mis_documentos", embedding=embeddings)
+    try:
+        embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+        # Ajustar URL según el entorno
+        qdrant_url = os.getenv("QDRANT_URL", "http://qdrant:6333")
+        client = QdrantClient(url=qdrant_url) 
+        
+        if not client.collection_exists("mis_documentos"):
+            client.create_collection(
+                collection_name="mis_documentos",
+                vectors_config=VectorParams(size=1536, distance=Distance.COSINE),
+            )
+        return QdrantVectorStore(client=client, collection_name="mis_documentos", embedding=embeddings)
+    except Exception as e:
+        st.error(f"Error al conectar con Qdrant: {e}")
+        st.stop()
 
 init_observability()
 vector_store = init_qdrant_and_embeddings()
