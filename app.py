@@ -92,7 +92,8 @@ agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
 
 # Función para obtener la conexión a la BD por cada ID de sesión
 def get_session_history(session_id: str):
-    db_url = os.getenv("DATABASE_URL", "postgresql://agentx:supersecret@localhost:5432/chat_history")
+    db_url = os.getenv("DATABASE_URL", "postgresql://agentx:supersecret@sre_postgres:5432/chat_history")
+    st.info(f"Conectando a PostgreSQL en: `{db_url.split('@')[1]}`")
     return SQLChatMessageHistory(session_id=session_id, connection_string=db_url)
 
 # Envolvemos el agente con la memoria persistente
