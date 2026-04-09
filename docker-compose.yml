@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   # Base de Datos Vectorial
-  qdrant-db:
+  sre_qdrant:
     image: qdrant/qdrant:latest
     ports:
       - "6333:6333"
@@ -51,9 +51,9 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:6006/v1/traces
       - DATABASE_URL=postgresql://agentx:supersecret@postgres:5432/chat_history
-      - QDRANT_URL=http://qdrant-db:6333
+      - QDRANT_URL=http://sre_qdrant:6333
     depends_on:
-      qdrant-db:
+      sre_qdrant:
         condition: service_healthy
       postgres:
         condition: service_healthy
