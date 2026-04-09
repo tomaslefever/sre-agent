@@ -106,18 +106,43 @@ def crear_ticket_sre(reporte: str, autor: str, asignado: str = None) -> str:
     db.add(new_ticket)
     
     # Vincular archivo si hay uno en el estado temporal
-    if "last_upload" in st.session_state:
+    if "last_upload" in st.session_state and st.session_state.last_upload:
         att = Attachment(id=str(uuid.uuid4()), ticket_id=t_id, 
                          filename=st.session_state.last_upload["name"],
                          file_type=st.session_state.last_upload["type"])
         db.add(att)
-        del st.session_state.last_upload
+        st.session_state.last_upload = None
 
     db.commit()
     db.close()
     return f"✅ Ticket {t_id} creado y asignado a {asignado}. El incidente ha sido registrado."
 
-tools = [buscar_conocimiento, crear_ticket_sre]
+@tool
+def asignar_ticket(ticket_id: str, tecnico: str) -> str:
+    """Reasigna un ticket a otro técnico."""
+    db = SessionLocal()
+    ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+    if ticket:
+        ticket.assigned_to = tecnico
+        db.commit()
+        db.close()
+        return f"✅ Ticket {ticket_id} reasignado a {tecnico}."
+    db.close()
+    return f"❌ Ticket {ticket_id} no encontrado."
+
+@tool
+def notificar_soporte(ticket_id: str, mensaje: str) -> str:
+    """Envía una notificación interna al equipo de soporte sobre un ticket."""
+    # Mock de envío de notificación
+    return f"✅ Notificación de soporte enviada para {ticket_id}: '{mensaje}'."
+
+@tool
+def notificar_usuario(ticket_id: str, mensaje: str) -> str:
+    """Envía un correo o alerta al usuario/autor informando el estado de su ticket."""
+    # Mock de envío a usuario
+    return f"✅ Usuario notificado sobre {ticket_id}: '{mensaje}'."
+
+tools = [buscar_conocimiento, crear_ticket_sre, asignar_ticket, notificar_soporte, notificar_usuario]
 
 # ==========================================
 # 3. CEREBRO DEL AGENTE
@@ -158,6 +183,10 @@ with st.sidebar:
     
     st.markdown("---")
     
+    st.session_state.debug_mode = st.checkbox("🛠️ Activar Debug Mode", value=st.session_state.get("debug_mode", False))
+    
+    st.markdown("---")
+    
     # Listado de Sesiones como botones y sin la palabra "Sesiones"
     if st.button("+ Nueva Sesión", use_container_width=True, type="primary"):
         new_id = str(uuid.uuid4())
@@ -181,18 +210,42 @@ if st.session_state.seccion == "Centro de Incidentes":
     h = get_chat_history(st.session_state.session_id)
     for m in h.messages:
         role = "user" if m.type == "human" else "assistant"
-        with st.chat_message(role): st.markdown(m.content)
+        with st.chat_message(role): 
+            content = m.content
+            # Extraer y ocultar la parte del sistema en los logs cargados
+            if "[SISTEMA:" in content:
+                partes = content.split("[SISTEMA:", 1)
+                visible = partes[0].strip()
+                hidden = "[SISTEMA:" + partes[1]
+                if visible:
+                    st.markdown(visible)
+                if st.session_state.debug_mode:
+                    with st.expander("🔎 Info de Sistema (Debug)"):
+                        st.caption(hidden)
+            else:
+                st.markdown(content)
 
-    # El dropzone (file uploader) colapsado para verse adherido al textarea
-    with st.container():
-        st.markdown("<style>div[data-testid='stFileUploader'] {margin-bottom: -15px;}</style>", unsafe_allow_html=True)
-        up_file = st.file_uploader("Dropzone", type=["txt", "log", "png", "jpg", "jpeg", "mp4"], label_visibility="collapsed")
-        if up_file:
-            st.session_state.last_upload = {"name": up_file.name, "type": up_file.type}
+    # El dropzone colapsado flotando en el fondo pegado al input
+    up_file = None
+    try:
+        # st.container(bottom=True) hace que el contenedor se pegue abajo junto al chat input (Streamlit > 1.30)
+        with st.container(bottom=True):
+            st.markdown("<style>div[data-testid='stFileUploader'] {margin-bottom: -15px;}</style>", unsafe_allow_html=True)
+            up_file = st.file_uploader("Evidencia", type=["txt", "log", "png", "jpg", "jpeg", "mp4"], label_visibility="collapsed")
+            if up_file:
+                st.session_state.last_upload = {"name": up_file.name, "type": up_file.type}
+    except TypeError:
+        # Fallback si Streamlit es una versión más antigua
+        with st.container():
+            st.markdown("<style>div[data-testid='stFileUploader'] {margin-bottom: -15px;}</style>", unsafe_allow_html=True)
+            up_file = st.file_uploader("Evidencia", type=["txt", "log", "png", "jpg", "jpeg", "mp4"], label_visibility="collapsed")
+            if up_file:
+                st.session_state.last_upload = {"name": up_file.name, "type": up_file.type}
             
     # Input y procesamiento del chat
     if u_input := st.chat_input("Diagnostica un fallo o solicita un ticket..."):
         ctx = ""
+        sys_msg = ""
         if up_file:
             if up_file.name.endswith((".log", ".txt")):
                 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -208,18 +261,27 @@ if st.session_state.seccion == "Centro de Incidentes":
                 with st.spinner(f"Indexando archivo gigante de {len(chunks)} fragmentos en Qdrant..."):
                     vector_store.add_documents(docs)
                 
-                # 3. Informamos a GPT-4o de que el dato está en su memoria y debe buscarlo.
-                ctx = f"\n\n[SISTEMA: El usuario ha adjuntado el archivo log '{up_file.name}'. No está en este prompt. En su lugar, ha sido indexado en tu base vectorial (Qdrant). Usa de forma obligatoria tu herramienta 'buscar_conocimiento' para leer sus partes y responder a la pregunta del usuario.]"
+                # 3. Guardamos el mensaje de sistema a agregar al prompt
+                sys_msg = f"\n\n[SISTEMA: El usuario ha adjuntado el archivo log '{up_file.name}'. No está en este prompt. En su lugar, ha sido indexado en tu base vectorial (Qdrant). Usa de forma obligatoria tu herramienta 'buscar_conocimiento' para leer sus partes y responder a la pregunta del usuario.]"
             else:
-                ctx = f"\n\n[MULTIMEDIA ADJUNTA: {up_file.name}]"
+                sys_msg = f"\n\n[SISTEMA: MULTIMEDIA ADJUNTA: {up_file.name}]"
         
+        full_input = u_input + sys_msg
+        
+        # Ocultar la parte de sistema en la UI en vivo
         with st.chat_message("user"): 
-            st.markdown(u_input + (ctx if len(ctx) < 500 else f"\n\n📎 *{up_file.name} adjuntado*"))
+            st.markdown(u_input)
+            if up_file:
+                if st.session_state.debug_mode:
+                    with st.expander("🔎 Info de Sistema (Debug)"):
+                        st.caption(sys_msg)
+                else:
+                    st.caption(f"📎 *Evidencia vinculada: {up_file.name}*")
         
         with st.chat_message("assistant"):
             with st.spinner("Analizando evidencia e infraestructura..."):
                 res = agent_with_memory.invoke(
-                    {"input": u_input + ctx},
+                    {"input": full_input},
                     config={"configurable": {"session_id": st.session_state.session_id}}
                 )
                 st.markdown(res["output"])
