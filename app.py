@@ -161,7 +161,12 @@ if seccion == "Centro de Incidentes":
         ctx = ""
         if up_file:
             if up_file.name.endswith((".log", ".txt")):
-                ctx = f"\n\n[ARCHIVO ADJUNTO: {up_file.name}]\n{up_file.read().decode()}"
+                file_content = up_file.read().decode(errors='replace')
+                # Para evitar exceder los límites de tokens de OpenAI, 
+                # truncamos logs masivos y nos quedamos con los últimos incidentes (final del archivo).
+                if len(file_content) > 30000:
+                    file_content = "...[INFORMACIÓN ACOTADA POR LÍMITE DE TAMAÑO - MOSTRANDO ÚLTIMAS LÍNEAS]...\n" + file_content[-30000:]
+                ctx = f"\n\n[ARCHIVO ADJUNTO: {up_file.name}]\n{file_content}"
             else:
                 ctx = f"\n\n[MULTIMEDIA ADJUNTA: {up_file.name}]"
         
