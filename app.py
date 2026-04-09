@@ -38,10 +38,10 @@ def init_observability():
 
 @st.cache_resource
 def init_qdrant_and_embeddings():
+    qdrant_url = os.getenv("QDRANT_URL", "http://qdrant:6333")
     try:
         embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-        # Ajustar URL según el entorno
-        qdrant_url = os.getenv("QDRANT_URL", "http://qdrant:6333")
+        st.info(f"Conectando a Qdrant en: `{qdrant_url}`")
         client = QdrantClient(url=qdrant_url) 
         
         if not client.collection_exists("mis_documentos"):
@@ -51,7 +51,7 @@ def init_qdrant_and_embeddings():
             )
         return QdrantVectorStore(client=client, collection_name="mis_documentos", embedding=embeddings)
     except Exception as e:
-        st.error(f"Error al conectar con Qdrant: {e}")
+        st.error(f"Error al conectar con Qdrant (`{qdrant_url}`): {e}")
         st.stop()
 
 init_observability()
