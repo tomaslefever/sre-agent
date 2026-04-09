@@ -1,5 +1,7 @@
-langchain
-langchain-openai
+langchain==0.2.16
+langchain-community==0.2.16
+langchain-core==0.2.43
+langchain-openai==0.1.23
 qdrant-client
 langchain-qdrant
 arize-phoenix
@@ -7,4 +9,3 @@ openinference-instrumentation-langchain
 streamlit
 psycopg2-binary
 SQLAlchemy
-langchain-community
