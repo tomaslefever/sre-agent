@@ -22,7 +22,7 @@ services:
       retries: 5
 
   # Base de Datos Relacional para Historial de Chat
-  sre_postgres:
+  postgres:
     image: postgres:15-alpine
     environment:
       - POSTGRES_USER=agentx
@@ -44,12 +44,12 @@ services:
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:6006/v1/traces
-      - DATABASE_URL=postgresql://agentx:supersecret@sre_postgres:5432/chat_history
+      - DATABASE_URL=postgresql://agentx:supersecret@postgres:5432/chat_history
       - QDRANT_URL=http://qdrant:6333
     depends_on:
       qdrant:
         condition: service_healthy
-      sre_postgres:
+      postgres:
         condition: service_healthy
       phoenix:
         condition: service_healthy
