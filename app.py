@@ -127,34 +127,46 @@ agent_with_memory = RunnableWithMessageHistory(
 with st.sidebar:
     st.header("SRE Control Center")
     
-    seccion = st.radio("Navegación", ["Centro de Incidentes", "Tablero de Tickets"])
+    # Navegación mediante botones en vez de select/radio
+    if "seccion" not in st.session_state:
+        st.session_state.seccion = "Centro de Incidentes"
+        
+    if st.button("🤖 Centro de Incidentes", use_container_width=True):
+        st.session_state.seccion = "Centro de Incidentes"
+    if st.button("📊 Tablero de Tickets", use_container_width=True):
+        st.session_state.seccion = "Tablero de Tickets"
     
     st.markdown("---")
     
-    st.subheader("Sesiones")
-    if st.button("+ Nueva Sesión", use_container_width=True):
-        new_id = str(uuid.uuid4()); st.session_state.session_list.append(new_id)
-        st.session_state.session_id = new_id; st.rerun()
+    # Listado de Sesiones como botones y sin la palabra "Sesiones"
+    if st.button("+ Nueva Sesión", use_container_width=True, type="primary"):
+        new_id = str(uuid.uuid4())
+        st.session_state.session_list.append(new_id)
+        st.session_state.session_id = new_id
+        st.rerun()
     
-    st.session_state.session_id = st.selectbox("Historial de conversaciones", st.session_state.session_list, 
-                                              label_visibility="collapsed",
-                                              index=st.session_state.session_list.index(st.session_state.session_id))
+    for s_id in reversed(st.session_state.session_list):
+        label = f"➡️ Sesión activa" if s_id == st.session_state.session_id else f"Historial {s_id[:6]}"
+        if st.button(label, key=f"btn_{s_id}", use_container_width=True):
+            st.session_state.session_id = s_id
+            st.rerun()
 
 # ==========================================
 # 5. VISTA PRINCIPAL
 # ==========================================
 st.title("AgentX: SRE Intelligence Platform")
 
-if seccion == "Centro de Incidentes":
+if st.session_state.seccion == "Centro de Incidentes":
     # Mostrar historial del chat
     h = get_chat_history(st.session_state.session_id)
     for m in h.messages:
         role = "user" if m.type == "human" else "assistant"
         with st.chat_message(role): st.markdown(m.content)
 
-    # Componente para adjuntar archivos (multimodal)
+    # El dropzone (file uploader) colapsado para verse adherido al textarea
     with st.container():
-        up_file = st.file_uploader("Adjuntar Evidencia (Logs / Imágenes / Videos)", type=["txt", "log", "png", "jpg", "jpeg", "mp4"])
+        st.markdown("<style>div[data-testid='stFileUploader'] {margin-bottom: -15px;}</style>", unsafe_allow_html=True)
+        up_file = st.file_uploader("Dropzone", type=["txt", "log", "png", "jpg", "jpeg", "mp4"], label_visibility="collapsed")
         if up_file:
             st.session_state.last_upload = {"name": up_file.name, "type": up_file.type}
             
@@ -192,7 +204,7 @@ if seccion == "Centro de Incidentes":
                 )
                 st.markdown(res["output"])
 
-elif seccion == "Tablero de Tickets":
+elif st.session_state.seccion == "Tablero de Tickets":
     st.header("Sistema de Gestión de Tickets")
     db = SessionLocal()
     
