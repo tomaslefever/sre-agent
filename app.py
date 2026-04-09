@@ -33,26 +33,29 @@ def init_observability():
     try:
         LangChainInstrumentor().instrument()
     except Exception as e:
-        st.warning(f"No se pudo inicializar la observabilidad: {e}")
+        if st.session_state.get("debug_mode"):
+            st.warning(f"No se pudo inicializar la observabilidad: {e}")
     return True
 
 @st.cache_resource
 def init_qdrant_and_embeddings():
     qdrant_url = os.getenv("QDRANT_URL", "http://qdrant-db:6333")
     # --- DIAGNÓSTICO DE RED ---
-    with st.expander("🛠️ Diagnóstico de Conexión (Debug)"):
-        st.write(f"URL configurada: `{qdrant_url}`")
-        try:
-            import socket
-            hostname = qdrant_url.split("//")[-1].split(":")[0]
-            ip = socket.gethostbyname(hostname)
-            st.success(f"Host `{hostname}` resuelto a IP: `{ip}`")
-        except Exception as e:
-            st.error(f"No se pudo resolver el host `{hostname}`: {e}")
+    if st.session_state.get("debug_mode"):
+        with st.expander("🛠️ Diagnóstico de Conexión (Debug)"):
+            st.write(f"URL configurada: `{qdrant_url}`")
+            try:
+                import socket
+                hostname = qdrant_url.split("//")[-1].split(":")[0]
+                ip = socket.gethostbyname(hostname)
+                st.success(f"Host `{hostname}` resuelto a IP: `{ip}`")
+            except Exception as e:
+                st.error(f"No se pudo resolver el host `{hostname}`: {e}")
     # --------------------------
     try:
         embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-        st.info(f"Conectando a Qdrant en: `{qdrant_url}`")
+        if st.session_state.get("debug_mode"):
+            st.info(f"Conectando a Qdrant en: `{qdrant_url}`")
         client = QdrantClient(url=qdrant_url) 
         
         if not client.collection_exists("mis_documentos"):
@@ -112,7 +115,8 @@ agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
 # Función para obtener la conexión a la BD por cada ID de sesión
 def get_session_history(session_id: str):
     db_url = os.getenv("DATABASE_URL", "postgresql://agentx:supersecret@postgres:5432/chat_history")
-    st.info(f"Conectando a PostgreSQL en: `{db_url.split('@')[1]}`")
+    if st.session_state.get("debug_mode"):
+        st.info(f"Conectando a PostgreSQL en: `{db_url.split('@')[1]}`")
     return SQLChatMessageHistory(session_id=session_id, connection_string=db_url)
 
 # Envolvemos el agente con la memoria persistente
@@ -164,10 +168,10 @@ with st.sidebar:
         st.session_state.simulate_alert = "ALERTA: Latencia > 500ms en el microservicio de Pagos."
     
     st.markdown("---")
-    st.info("""
-    **Objetivo del Agente:**
-    Analizar incidentes, consultar bases de conocimiento y automatizar la creación de tickets de soporte para reducir el MTTR (Mean Time To Recovery).
-    """)
+    st.subheader("🛠️ Settings")
+    st.session_state.debug_mode = st.checkbox("Modo Debug (Logs técnicos)", value=False)
+    
+    st.markdown("---")
 
 # --- MAIN UI ---
 st.title("🤖 SRE Agente Inteligente")
