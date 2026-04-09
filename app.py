@@ -1,156 +1,208 @@
 import os
 import uuid
 import base64
+import pandas as pd
 import streamlit as st
-import phoenix as px
-from openinference.instrumentation.langchain import LangChainInstrumentor
+from datetime import datetime
+from sqlalchemy import create_engine, Column, String, DateTime, Text, ForeignKey, create_engine
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
 
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams
-from langchain.agents import create_tool_calling_agent
-from langchain.agents import AgentExecutor
+from langchain.agents import create_tool_calling_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.tools import tool
 
-# --- PERSISTENCIA ---
+# --- PERSISTENCIA CHAT ---
 from langchain_community.chat_message_histories import SQLChatMessageHistory
 from langchain_core.runnables.history import RunnableWithMessageHistory
 
 # ==========================================
-# 1. CONFIGURACIÓN Y ESTILO (TAILWIND)
+# 0. CONFIGURACIÓN DE DB (TICKETS)
 # ==========================================
-st.set_page_config(page_title="SRE AgentX Platform", page_icon="🤖", layout="wide")
+Base = declarative_base()
+DB_URL = os.getenv("DATABASE_URL", "postgresql://agentx:supersecret@postgres:5432/chat_history")
+engine = create_engine(DB_URL)
+SessionLocal = sessionmaker(bind=engine)
 
-# Inyectamos Tailwind para futuras expansiones de UI personalizada
+class Ticket(Base):
+    __tablename__ = "tickets"
+    id = Column(String, primary_key=True)
+    report = Column(Text)
+    author = Column(String)
+    assigned_to = Column(String)
+    status = Column(String, default="Abierto")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class Attachment(Base):
+    __tablename__ = "attachments"
+    id = Column(String, primary_key=True)
+    ticket_id = Column(String, ForeignKey("tickets.id"))
+    filename = Column(String)
+    file_type = Column(String)
+
+Base.metadata.create_all(engine)
+
+# Lista de técnicos mock
+TECNICOS = ["Alex SRE", "Sonia DevOps", "Carlos Cloud", "Marta Security"]
+
+# ==========================================
+# 1. CONFIGURACIÓN STREAMLIT
+# ==========================================
+st.set_page_config(page_title="AgentX: SRE & Ticketing", page_icon="🎫", layout="wide")
 st.markdown('<script src="https://cdn.tailwindcss.com"></script>', unsafe_allow_html=True)
 
-if "OPENAI_API_KEY" not in os.environ:
-    st.error("⚠️ Falta OPENAI_API_KEY en las variables de entorno.")
-    st.stop()
-
-# Manejo de IDs de Sesión
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
 if "session_list" not in st.session_state:
     st.session_state.session_list = [st.session_state.session_id]
 
 # ==========================================
-# 2. INICIALIZACIÓN DE SERVICIOS
+# 2. HERRAMIENTAS DEL AGENTE
 # ==========================================
-@st.cache_resource
-def init_qdrant():
+@tool
+def buscar_conocimiento(query: str) -> str:
+    """Busca soluciones técnicas en la base de datos vectorial."""
     qdrant_url = os.getenv("QDRANT_URL", "http://qdrant-db:6333")
+    client = QdrantClient(url=qdrant_url)
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-    client = QdrantClient(url=qdrant_url) 
-    if not client.collection_exists("kb_sre"):
-        client.create_collection(
-            collection_name="kb_sre",
-            vectors_config=VectorParams(size=1536, distance=Distance.COSINE),
-        )
-    return QdrantVectorStore(client=client, collection_name="kb_sre", embedding=embeddings)
-
-vector_store = init_qdrant()
-
-# ==========================================
-# 3. HERRAMIENTAS Y CEREBRO DEL AGENTE
-# ==========================================
-@tool
-def diagnosticar_incidente(query: str) -> str:
-    """Busca en la base de conocimiento interna soluciones a errores conocidos."""
-    retriever = vector_store.as_retriever(search_kwargs={"k": 2})
-    docs = retriever.invoke(query)
-    return "\n\n".join([doc.page_content for doc in docs]) if docs else "No se encontró historial previo de este error."
+    vector_store = QdrantVectorStore(client=client, collection_name="kb_sre", embedding=embeddings)
+    docs = vector_store.as_retriever().invoke(query)
+    return "\n\n".join([d.page_content for d in docs]) if docs else "No hay info."
 
 @tool
-def registrar_ticket(descripcion: str, prioridad: str) -> str:
-    """Crea un ticket oficial con ID único para seguimiento humano."""
-    return f"Ticket generado: [#{uuid.uuid4().hex[:6].upper()}] - Prioridad: {prioridad}. El equipo SRE ha sido alertado."
+def crear_ticket_sre(reporte: str, autor: str, asignado: str = None) -> str:
+    """Crea un ticket en el sistema. Si no se especifica asignado, elige uno de: Alex, Sonia, Carlos, Marta."""
+    if not asignado:
+        import random
+        asignado = random.choice(TECNICOS)
+    
+    t_id = f"TCK-{uuid.uuid4().hex[:6].upper()}"
+    db = SessionLocal()
+    new_ticket = Ticket(id=t_id, report=reporte, author=autor, assigned_to=asignado)
+    db.add(new_ticket)
+    
+    # Vincular archivo si hay uno en el estado temporal
+    if "last_upload" in st.session_state:
+        att = Attachment(id=str(uuid.uuid4()), ticket_id=t_id, 
+                         filename=st.session_state.last_upload["name"],
+                         file_type=st.session_state.last_upload["type"])
+        db.add(att)
+        del st.session_state.last_upload
 
-tools = [diagnosticar_incidente, registrar_ticket]
+    db.commit()
+    db.close()
+    return f"✅ Ticket {t_id} creado y asignado a {asignado}. El incidente ha sido registrado."
 
-# El prompt ahora acepta instrucciones multimodales (textuales por ahora para compatibilidad)
+tools = [buscar_conocimiento, crear_ticket_sre]
+
+# ==========================================
+# 3. CEREBRO DEL AGENTE
+# ==========================================
+llm = ChatOpenAI(model="gpt-4o", temperature=0)
 prompt = ChatPromptTemplate.from_messages([
-    ("system", "Eres AgentX, un Ingeniero SRE avanzado. Analizas texto, logs y descripciones de imágenes. Tu misión es resolver problemas y reducir el ruido en las alertas."),
+    ("system", f"Eres un Agente SRE experto. Administras incidencias y tickets. Técnicos disponibles: {', '.join(TECNICOS)}."),
     ("placeholder", "{chat_history}"),
     ("human", "{input}"),
     ("placeholder", "{agent_scratchpad}"),
 ])
+agent_exec = AgentExecutor(agent=create_tool_calling_agent(llm, tools, prompt), tools=tools, verbose=True)
 
-llm = ChatOpenAI(model="gpt-4o", temperature=0) # GPT-4o es nativamente multimodal
-agent = create_tool_calling_agent(llm, tools, prompt)
-agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
+def get_chat_history(id_sesion: str):
+    return SQLChatMessageHistory(session_id=id_sesion, connection_string=DB_URL)
 
-def get_history(session_id: str):
-    db_url = os.getenv("DATABASE_URL", "postgresql://agentx:supersecret@postgres:5432/chat_history")
-    return SQLChatMessageHistory(session_id=session_id, connection_string=db_url)
-
-agent_fluent = RunnableWithMessageHistory(
-    agent_executor, get_history,
+agent_with_memory = RunnableWithMessageHistory(
+    agent_exec, get_chat_history,
     input_messages_key="input", history_messages_key="chat_history"
 )
 
 # ==========================================
-# 4. INTERFAZ (SIDEBAR)
+# 4. INTERFAZ: SIDEBAR Y DASHBOARD
 # ==========================================
 with st.sidebar:
-    st.header("SRE Control Panel")
-    st.markdown("---")
+    st.header("SRE Control Center")
+    tab_chat, tab_tickets = st.tabs(["💬 Chat", "🎫 Tickets"])
     
-    st.subheader("Sesiones Activas")
-    if st.button("+ Nueva Sesión", type="primary", use_container_width=True):
-        new_id = str(uuid.uuid4())
-        st.session_state.session_list.append(new_id)
-        st.session_state.session_id = new_id
-        st.rerun()
-    
-    selected_session = st.selectbox("Historial de Incidencias", st.session_state.session_list, 
-                                   index=st.session_state.session_list.index(st.session_state.session_id))
-    if selected_session != st.session_state.session_id:
-        st.session_state.session_id = selected_session
-        st.rerun()
+    with tab_chat:
+        st.subheader("Sesiones")
+        if st.button("+ Nueva Sesión"):
+            new_id = str(uuid.uuid4()); st.session_state.session_list.append(new_id)
+            st.session_state.session_id = new_id; st.rerun()
+        
+        st.session_state.session_id = st.selectbox("Historial", st.session_state.session_list, 
+                                                  index=st.session_state.session_list.index(st.session_state.session_id))
+        st.markdown("---")
+        st.subheader("Adjuntos")
+        up_file = st.file_uploader("Evidencia (Logs/Img)", type=["txt", "log", "png", "jpg"])
+        if up_file:
+            st.session_state.last_upload = {"name": up_file.name, "type": up_file.type}
 
-    st.markdown("---")
-    st.subheader("Evidencia Multimodal")
-    uploaded_file = st.file_uploader("Subir Logs o Imágenes", type=["txt", "log", "png", "jpg", "jpeg"])
-    if st.checkbox("Modo Debug (Red/Logs)"):
-        st.caption(f"ID Sesión: `{st.session_state.session_id}`")
-        st.caption(f"Qdrant: `{os.getenv('QDRANT_URL', 'http://qdrant-db:6333')}`")
+    with tab_tickets:
+        st.subheader("Estado del Sistema")
+        db = SessionLocal()
+        tickets_df = pd.read_sql(db.query(Ticket).statement, engine)
+        db.close()
+        if not tickets_df.empty:
+            st.dataframe(tickets_df[["id", "status", "assigned_to"]], hide_index=True)
+        else:
+            st.write("No hay tickets activos.")
 
 # ==========================================
-# 5. ÁREA DE CHAT PRINCIPAL
+# 5. VISTA PRINCIPAL
 # ==========================================
-st.title("AgentX: SRE Intelligence")
+st.title("AgentX: SRE Intelligence Platform")
 
-# Mostrar historial persistente
-history_store = get_history(st.session_state.session_id)
-for msg in history_store.messages:
-    role = "user" if msg.type == "human" else "assistant"
-    with st.chat_message(role):
-        st.markdown(msg.content)
+# Tabs principales
+t1, t2 = st.tabs(["🤖 Centro de Incidentes", "📊 Tablero de Tickets"])
 
-# Input del usuario
-if user_input := st.chat_input("Escribe el problema o pregunta sobre los logs..."):
+with t1:
+    h = get_chat_history(st.session_state.session_id)
+    for m in h.messages:
+        role = "user" if m.type == "human" else "assistant"
+        with st.chat_message(role): st.markdown(m.content)
+
+    if u_input := st.chat_input("Diagnostica un fallo o solicita un ticket..."):
+        ctx = ""
+        if up_file:
+            if up_file.name.endswith((".log", ".txt")):
+                ctx = f"\n\n[ARCHIVO: {up_file.name}]\n{up_file.read().decode()}"
+            else:
+                ctx = f"\n\n[IMAGEN ADJUNTA: {up_file.name}]"
+        
+        with st.chat_message("user"): st.markdown(u_input + (ctx if len(ctx) < 500 else "\n[Log extenso adjunto]"))
+        
+        with st.chat_message("assistant"):
+            with st.spinner("Analizando y procesando incidente..."):
+                res = agent_with_memory.invoke(
+                    {"input": u_input + ctx},
+                    config={"configurable": {"session_id": st.session_state.session_id}}
+                )
+                st.markdown(res["output"])
+
+with t2:
+    st.header("🎫 Sistema de Gestión de Tickets (SRE)")
+    db = SessionLocal()
+    all_t = db.query(Ticket).all()
     
-    contexto_archivo = ""
-    # Procesamiento de archivos (Multimodal)
-    if uploaded_file:
-        if uploaded_file.type.startswith("image/"):
-            # Para imágenes, la describimos contextualmente mientras LangChain mejora su soporte nativo directo en agentes
-            contexto_archivo = f"\n[ANALIZANDO IMAGEN ADJUNTA: {uploaded_file.name}]"
-        elif uploaded_file.name.endswith((".log", ".txt")):
-            log_txt = uploaded_file.read().decode()
-            contexto_archivo = f"\n\n--- LOG ADJUNTO ({uploaded_file.name}) ---\n{log_txt}\n------------------\n"
-
-    with st.chat_message("user"):
-        st.markdown(user_input + contexto_archivo)
-
-    with st.chat_message("assistant"):
-        with st.spinner("Procesando evidencia técnica..."):
-            full_query = user_input + contexto_archivo
-            respuesta = agent_fluent.invoke(
-                {"input": full_query},
-                config={"configurable": {"session_id": st.session_state.session_id}}
-            )
-            st.markdown(respuesta["output"])
+    if all_t:
+        for t in all_t:
+            with st.expander(f"{t.id} - {t.report[:50]}..."):
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Autor", t.author)
+                c2.metric("Asignado", t.assigned_to)
+                c3.metric("Estado", t.status)
+                st.write("**Reporte Completo:**")
+                st.write(t.report)
+                
+                # Mostrar adjuntos
+                atts = db.query(Attachment).filter_by(ticket_id=t.id).all()
+                if atts:
+                    st.write("**Adjuntos:**")
+                    for a in atts:
+                        st.caption(f"📎 {a.filename} ({a.file_type})")
+    else:
+        st.info("El tablero está vacío. Pide al agente que cree un ticket para empezar.")
+    db.close()

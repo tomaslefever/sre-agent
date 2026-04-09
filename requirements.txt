@@ -9,3 +9,4 @@ openinference-instrumentation-langchain
 streamlit
 psycopg2-binary
 SQLAlchemy
+pandas
