@@ -61,6 +61,26 @@ if "session_list" not in st.session_state:
     st.session_state.session_list = [st.session_state.session_id]
 
 # ==========================================
+# 1.5 INICIALIZACIÓN DE VECTOR STORE Y RAG
+# ==========================================
+@st.cache_resource
+def get_vector_store():
+    qdrant_url = os.getenv("QDRANT_URL", "http://qdrant-db:6333")
+    client = QdrantClient(url=qdrant_url)
+    embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+    try:
+        if not client.collection_exists("kb_sre"):
+            client.create_collection(
+                collection_name="kb_sre",
+                vectors_config=VectorParams(size=1536, distance=Distance.COSINE),
+            )
+    except Exception:
+        pass # Handle if Qdrant throws error checking collection
+    return QdrantVectorStore(client=client, collection_name="kb_sre", embedding=embeddings)
+
+vector_store = get_vector_store()
+
+# ==========================================
 # 2. HERRAMIENTAS DEL AGENTE
 # ==========================================
 @tool
