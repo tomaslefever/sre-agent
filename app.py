@@ -193,11 +193,14 @@ elif st.session_state.seccion == "Tablero de Tickets":
                         st.info(resultado)
                         st.button("🔄 Recargar vista", on_click=lambda: st.rerun())
                     
-                    if st.button("🚀 Ejecutar Plan", use_container_width=True, type="primary"):
+                    if st.button("🚀 Ejecutar Plan → PR", use_container_width=True, type="primary"):
                         from agent_engine import ejecutar_plan_accion
-                        with st.spinner("Ejecutando plan..."):
+                        with st.spinner("🔧 Generando código y creando PR en GitHub..."):
                             resultado = ejecutar_plan_accion.invoke({"ticket_id": t_id})
-                        st.success(resultado)
+                        if "Error" in resultado:
+                            st.error(resultado)
+                        else:
+                            st.success(resultado)
                         st.button("🔄 Recargar vista", key="reload_plan", on_click=lambda: st.rerun())
                     
                     if t.status not in ("RESOLVED", "Resuelto"):

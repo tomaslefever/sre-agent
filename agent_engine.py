@@ -266,15 +266,202 @@ Responde UNICAMENTE con un JSON valido con estas claves:
 
 @tool
 def ejecutar_plan_accion(ticket_id: str) -> str:
-    """Ejecuta plan."""
+    """Ejecuta el plan de accion del ticket: genera codigo corregido con IA y crea un Pull Request en GitHub."""
+    import json
+    import requests
+    from langchain_core.messages import SystemMessage, HumanMessage
+    
+    gh_token = os.getenv("GITHUB_TOKEN")
+    if not gh_token:
+        return "Error: GITHUB_TOKEN no configurado. No se puede crear PR."
+    
     db = SessionLocal()
     t = db.query(Ticket).filter(Ticket.id == ticket_id).first()
-    if t:
+    if not t:
+        db.close()
+        return "Ticket no encontrado."
+    
+    planes = list(t.planes_accion) if t.planes_accion else []
+    if not planes:
+        db.close()
+        return "No hay plan de accion. Ejecuta Fast-Track primero."
+    
+    ultimo_plan = planes[-1]
+    plan_text = ultimo_plan.get("plan", "")
+    archivos_rev = ultimo_plan.get("archivos_revisados", [])
+    hallazgos = ultimo_plan.get("hallazgos", [])
+    
+    # Buscar repositorio vinculado
+    from database import Repository
+    repo = db.query(Repository).first()
+    if not repo or not repo.url:
+        db.close()
+        return "No hay repositorio vinculado. Agrega uno en Base de Conocimiento."
+    
+    # Extraer owner/repo de la URL
+    repo_url = repo.url.rstrip("/")
+    parts = repo_url.replace("https://github.com/", "").replace("http://github.com/", "").split("/")
+    if len(parts) < 2:
+        db.close()
+        return f"URL de repo invalida: {repo_url}"
+    owner, repo_name = parts[0], parts[1].replace(".git", "")
+    
+    headers = {
+        "Authorization": f"token {gh_token}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+    api_base = f"https://api.github.com/repos/{owner}/{repo_name}"
+    branch_name = f"fix/{ticket_id.lower()}"
+    
+    try:
+        # 1. Obtener SHA de main
+        ref_res = requests.get(f"{api_base}/git/ref/heads/main", headers=headers)
+        if ref_res.status_code != 200:
+            # Intentar con master
+            ref_res = requests.get(f"{api_base}/git/ref/heads/master", headers=headers)
+        if ref_res.status_code != 200:
+            db.close()
+            return f"Error al obtener rama principal: {ref_res.json().get('message', ref_res.status_code)}"
+        
+        base_sha = ref_res.json()["object"]["sha"]
+        base_branch = "main" if "main" in ref_res.url else "master"
+        
+        # 2. Crear rama
+        create_ref = requests.post(f"{api_base}/git/refs", headers=headers, json={
+            "ref": f"refs/heads/{branch_name}",
+            "sha": base_sha
+        })
+        if create_ref.status_code not in (200, 201, 422):  # 422 = ya existe
+            db.close()
+            return f"Error al crear rama: {create_ref.json().get('message', '')}"
+        
+        # 3. Para cada archivo mencionado, obtener codigo de Qdrant y generar fix
+        v_store = get_vector_store()
+        llm = ChatOpenAI(model=os.getenv("OPENAI_MODEL", "gpt-4o"), temperature=0)
+        
+        archivos_modificados = []
+        
+        for archivo in archivos_rev:
+            # Leer codigo actual del archivo desde Qdrant
+            from qdrant_client.models import Filter, FieldCondition, MatchValue
+            q_url = os.getenv("QDRANT_URL", "http://qdrant-db:6333")
+            client = QdrantClient(url=q_url)
+            
+            codigo_chunks = []
+            for filter_key in ["metadata.source", "source"]:
+                res_q = client.scroll(
+                    collection_name="kb_sre",
+                    scroll_filter=Filter(must=[FieldCondition(key=filter_key, match=MatchValue(value=archivo))]),
+                    limit=50, with_payload=True
+                )[0]
+                if res_q:
+                    codigo_chunks = [p.payload.get("page_content", p.payload.get("content", "")) for p in res_q]
+                    break
+            
+            if not codigo_chunks:
+                continue
+            
+            codigo_original = "\n".join(codigo_chunks)
+            
+            # Generar codigo corregido con LLM
+            fix_messages = [
+                SystemMessage(content="Eres un ingeniero de software senior. Tu tarea es aplicar correcciones al codigo fuente. Devuelve UNICAMENTE el codigo corregido completo, sin markdown, sin explicaciones."),
+                HumanMessage(content=f"""ARCHIVO: {archivo}
+
+CODIGO ORIGINAL:
+{codigo_original}
+
+PROBLEMA REPORTADO:
+{t.report}
+
+HALLAZGOS:
+{chr(10).join(hallazgos) if hallazgos else 'Ver plan'}
+
+PLAN DE CORRECCION:
+{plan_text}
+
+Devuelve el codigo corregido completo del archivo. Solo el codigo, sin backticks ni explicaciones.""")
+            ]
+            
+            fix_res = llm.invoke(fix_messages)
+            codigo_corregido = fix_res.content.strip()
+            if codigo_corregido.startswith("```"):
+                # Limpiar backticks si el LLM los puso
+                lines = codigo_corregido.split("\n")
+                codigo_corregido = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+            
+            # 4. Obtener archivo actual de GitHub (si existe) para obtener su SHA
+            file_path = archivo.lstrip("/")
+            file_res = requests.get(f"{api_base}/contents/{file_path}?ref={branch_name}", headers=headers)
+            
+            commit_data = {
+                "message": f"fix({ticket_id}): corregir {file_path}",
+                "content": __import__("base64").b64encode(codigo_corregido.encode()).decode(),
+                "branch": branch_name
+            }
+            if file_res.status_code == 200:
+                commit_data["sha"] = file_res.json()["sha"]
+            
+            put_res = requests.put(f"{api_base}/contents/{file_path}", headers=headers, json=commit_data)
+            if put_res.status_code in (200, 201):
+                archivos_modificados.append(file_path)
+        
+        # 5. Crear Pull Request
+        pr_body = f"""## 🎫 Ticket: {ticket_id}
+
+### Reporte
+{t.report[:500]}
+
+### Veredicto
+{t.veredicto or 'N/A'}
+
+### Archivos modificados
+{chr(10).join(['- `' + a + '`' for a in archivos_modificados]) if archivos_modificados else 'Ninguno'}
+
+### Plan aplicado
+{plan_text}
+
+---
+*Generado automaticamente por AgentX SRE*"""
+        
+        pr_res = requests.post(f"{api_base}/pulls", headers=headers, json={
+            "title": f"fix({ticket_id}): {t.veredicto[:80] if t.veredicto else 'Correccion automatica'}",
+            "body": pr_body,
+            "head": branch_name,
+            "base": base_branch
+        })
+        
+        if pr_res.status_code in (200, 201):
+            pr_url = pr_res.json().get("html_url", "")
+            t.status = "PENDING_NOTIF"
+            db.add(TicketThread(
+                id=str(uuid.uuid4()), ticket_id=ticket_id, author="SRE-Agent",
+                content=f"**PR creado:** [{branch_name}]({pr_url})\n\nArchivos modificados: {', '.join(archivos_modificados)}"
+            ))
+            db.commit()
+            db.close()
+            return f"PR creado exitosamente: {pr_url}\nArchivos: {', '.join(archivos_modificados)}"
+        else:
+            err = pr_res.json().get("message", str(pr_res.status_code))
+            # Aun si falla el PR, registrar los commits
+            t.status = "PENDING_NOTIF"
+            db.add(TicketThread(
+                id=str(uuid.uuid4()), ticket_id=ticket_id, author="SRE-Agent",
+                content=f"Commits en rama `{branch_name}` ({len(archivos_modificados)} archivos). PR fallido: {err}"
+            ))
+            db.commit()
+            db.close()
+            return f"Commits realizados en rama {branch_name}. Error al crear PR: {err}"
+    
+    except Exception as e:
         t.status = "PENDING_NOTIF"
-        db.add(TicketThread(id=str(uuid.uuid4()), ticket_id=ticket_id, author="SRE-Agent", content="Plan ejecutado."))
+        db.add(TicketThread(
+            id=str(uuid.uuid4()), ticket_id=ticket_id, author="SRE-Agent",
+            content=f"Error al ejecutar plan: {str(e)}"
+        ))
         db.commit()
-    db.close()
-    return "Plan Ejecutado"
+        db.close()
+        return f"Error: {str(e)}"
 
 tools = [buscar_conocimiento, listar_archivos_conocimiento, leer_archivo_conocimiento, buscar_codigo_detallado, leer_ticket, crear_ticket_sre, actualizar_veredicto, generar_plan_accion, diagnostico_fast_track, ejecutar_plan_accion]
 
