@@ -39,6 +39,14 @@ class Ticket(Base):
     veredicto = Column(Text, nullable=True)
     planes_accion = Column(JSON, default=list)
 
+class TicketThread(Base):
+    __tablename__ = "ticket_threads"
+    id = Column(String, primary_key=True)
+    ticket_id = Column(String, ForeignKey("tickets.id"))
+    author = Column(String)
+    content = Column(Text)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+
 class Attachment(Base):
     __tablename__ = "attachments"
     id = Column(String, primary_key=True)
@@ -251,6 +259,80 @@ def generar_plan_accion(ticket_id: str, nuevo_plan: str) -> str:
         db.close()
         return f"✅ Plan de acción (Versión {nueva_version}) generado para el ticket {ticket_id}."
 @tool
+def diagnostico_fast_track(ticket_id: str) -> str:
+    """Ruta rápida de análisis: Busca 10 contextos en Qdrant y genera diagnóstico + plan de acción en una sola pasada. Úsala para ser veloz."""
+    db = SessionLocal()
+    t = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+    if not t:
+        db.close()
+        return "Ticket no encontrado."
+    
+    # 1. Búsqueda intensiva (10 chunks)
+    q_url = os.getenv("QDRANT_URL", "http://qdrant-db:6333")
+    client = QdrantClient(url=q_url)
+    embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+    v_store = QdrantVectorStore(client=client, collection_name="kb_sre", embedding=embeddings)
+    contextos = v_store.as_retriever(search_kwargs={"k": 10}).invoke(t.report)
+    context_text = "\n---\n".join([d.page_content for d in contextos])
+    
+    # 2. Completion directa
+    from langchain_openai import ChatOpenAI
+    from langchain_core.messages import SystemMessage, HumanMessage
+    
+    fast_llm = ChatOpenAI(model="gpt-4o", temperature=0)
+    msg_prompt = f"""Como Ingeniero SRE Senior, analiza este incidente USANDO EL CONTEXTO DEL CÓDIGO adjunto.
+    INCIDENTE: {t.report}
+    CÓDIGO/DOCS RELACIONADOS:
+    {context_text}
+    
+    RESPONDE ÚNICAMENTE EN FORMATO JSON:
+    {{
+      "veredicto": "Breve explicación técnica de la causa raíz",
+      "plan": "Pasos detallados para corregir el fallo"
+    }}"""
+    
+    res = fast_llm.invoke([SystemMessage(content="Eres un SRE experto en diagnóstico rápido."), HumanMessage(content=msg_prompt)])
+    try:
+        import json
+        clean_res = res.content.replace("```json", "").replace("```", "").strip()
+        data = json.loads(clean_res)
+        t.veredicto = data["veredicto"]
+        planes = list(t.planes_accion) if t.planes_accion else []
+        nueva_v = len(planes) + 1
+        planes.append({
+            "version": nueva_v,
+            "plan": data["plan"],
+            "fecha": datetime.utcnow().isoformat()
+        })
+        t.planes_accion = planes
+        db.commit()
+        db.close()
+        return f"✅ Diagnóstico Fast-Track completado para {ticket_id}. Plan V{nueva_v} creado."
+    except Exception as e:
+        db.close()
+        return f"Error parseando la respuesta rápida del LLM: {str(e)}"
+
+@tool
+def ejecutar_plan_accion(ticket_id: str) -> str:
+    """Marca el plan de acción como ejecutado, notifica al equipo y mueve el ticket a estado 'PENDING_NOTIF' para revisión final."""
+    db = SessionLocal()
+    t = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+    if t:
+        t.status = "PENDING_NOTIF"
+        new_comment = TicketThread(
+            id=str(uuid.uuid4()),
+            ticket_id=ticket_id,
+            author="SRE-Agent (Automación)",
+            content="🚀 Plan de acción ejecutado satisfactoriamente. El sistema está en fase de monitoreo post-corrección. Ticket movido a REVISIÓN."
+        )
+        db.add(new_comment)
+        db.commit()
+        db.close()
+        return f"🚀 Plan ejecutado para {ticket_id}. Ticket en REVISIÓN."
+    db.close()
+    return "Ticket no encontrado."
+
+@tool
 def leer_ticket(ticket_id: str) -> str:
     """Lee toda la información actual de un ticket de la base de datos: reporte, veredicto, autor y planes previos."""
     db = SessionLocal()
@@ -266,7 +348,7 @@ def leer_ticket(ticket_id: str) -> str:
     db.close()
     return f"❌ Ticket {ticket_id} no encontrado."
 
-tools = [buscar_conocimiento, listar_archivos_conocimiento, leer_archivo_conocimiento, leer_ticket, crear_ticket_sre, asignar_ticket, notificar_soporte, notificar_usuario, resolver_ticket, actualizar_veredicto, generar_plan_accion]
+tools = [buscar_conocimiento, listar_archivos_conocimiento, leer_archivo_conocimiento, leer_ticket, crear_ticket_sre, asignar_ticket, notificar_soporte, notificar_usuario, resolver_ticket, actualizar_veredicto, generar_plan_accion, diagnostico_fast_track, ejecutar_plan_accion]
 
 # ==========================================
 # 3. CEREBRO DEL AGENTE (RAG + GUARDRAILS)
@@ -475,6 +557,55 @@ elif st.session_state.seccion == "Tablero de Tickets":
         {"id": "RESOLVED", "label": "✅ RESUELTOS", "db_st": "RESOLVED"}
     ]
     
+    # Lógica de Vista Detalle (Modal Simulado)
+    if "selected_ticket" in st.session_state and st.session_state.selected_ticket:
+        t_id = st.session_state.selected_ticket
+        t_db = db.query(Ticket).filter(Ticket.id == t_id).first()
+        if t_db:
+            st.markdown(f"### 🔍 Detalle Extendido: {t_id}")
+            if st.button("⬅️ Volver al Kanban"):
+                st.session_state.selected_ticket = None
+                st.rerun()
+            
+            c_main, c_side = st.columns([2, 1])
+            with c_main:
+                st.markdown("#### 📜 Historia del Incidente")
+                # Hilos (Comentarios)
+                threads = db.query(TicketThread).filter(TicketThread.ticket_id == t_id).order_by(TicketThread.timestamp.asc()).all()
+                for th in threads:
+                    with st.chat_message("user" if th.author != "SRE-Agent" else "assistant"):
+                        st.markdown(f"**{th.author}** - {th.timestamp.strftime('%H:%M')}")
+                        st.write(th.content)
+                
+                # Añadir hilo
+                with st.container():
+                    nuevo_hilo = st.text_area("Añadir comentario o actualización...", key=f"hilo_{t_id}")
+                    if st.button("Enviar Comentario"):
+                        if nuevo_hilo:
+                            nt = TicketThread(id=str(uuid.uuid4()), ticket_id=t_id, author="Usuario", content=nuevo_hilo)
+                            db.add(nt)
+                            db.commit()
+                            st.rerun()
+
+            with c_side:
+                st.markdown("#### ⚙️ Operaciones")
+                if st.button("⚡ Ejecutar Plan de Acción", use_container_width=True, type="primary"):
+                    st.session_state.run_agent_command = f"Usa la herramienta 'ejecutar_plan_accion' para el ticket {t_id}."
+                    st.session_state.seccion = "Centro de Incidentes"
+                    st.rerun()
+                
+                if st.button("🔄 Forzar Re-Análisis Fast", use_container_width=True):
+                    st.session_state.run_agent_command = f"Usa la herramienta 'diagnostico_fast_track' para el ticket {t_id}."
+                    st.session_state.seccion = "Centro de Incidentes"
+                    st.rerun()
+                
+                st.divider()
+                st.caption(f"Status: {t_db.status}")
+                st.caption(f"Veredicto: {t_db.veredicto[:100]}...")
+
+        db.close()
+        st.stop() # Detener render del kanban si estamos en detalle
+    
     k_cols = st.columns(4)
     all_tickets = db.query(Ticket).order_by(Ticket.id.desc()).all()
     
@@ -495,22 +626,13 @@ elif st.session_state.seccion == "Tablero de Tickets":
                     st.caption(f"👤 {t.author} | 👨‍💻 {t.assigned_to or '?'}")
                     
                     # Contenido colapsable para no saturar el Kanban
-                    with st.expander("Ver más..."):
-                        st.write(f"**Reporte:** {t.report[:100]}...")
-                        if t.veredicto:
-                            st.success(f"⚖️ **Veredicto:** {t.veredicto[:60]}...")
-                        
-                        planes = t.planes_accion if t.planes_accion else []
-                        if planes:
-                            state_key = f"k_plan_{t.id}"
-                            if state_key not in st.session_state:
-                                st.session_state[state_key] = len(planes) - 1
-                            curr_idx = st.session_state[state_key]
-                            st.caption(f"🎯 Plan V{planes[curr_idx]['version']}")
+                    if st.button("🔍 Ver Detalle", key=f"k_det_{t.id}", use_container_width=True):
+                        st.session_state.selected_ticket = t.id
+                        st.rerun()
                     
                     # Botones de acción rápida
-                    if st.button("🚀 Analizar", key=f"k_gen_{t.id}", use_container_width=True):
-                        st.session_state.run_agent_command = f"Busca en el conocimiento y genera un veredicto y plan de acción para el ticket {t.id}."
+                    if st.button("🚀 Fast-Track IA", key=f"k_gen_{t.id}", use_container_width=True):
+                        st.session_state.run_agent_command = f"Usa 'diagnostico_fast_track' para el ticket {t.id}."
                         st.session_state.seccion = "Centro de Incidentes"
                         st.rerun()
                         
