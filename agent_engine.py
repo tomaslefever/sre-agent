@@ -587,8 +587,26 @@ def crear_pr_ticket(ticket_id: str) -> str:
 *Generado automaticamente por AgentX SRE*"""
 
     try:
+        # Check if a PR already exists for this branch
+        existing_prs = requests.get(f"{api_base}/pulls?head={owner}:{branch_name}&state=open", headers=headers)
+        if existing_prs.status_code == 200 and existing_prs.json():
+            pr_url = existing_prs.json()[0].get("html_url", "")
+            t.status = "AWAITING_VALIDATION"
+            db.add(TicketThread(
+                id=str(uuid.uuid4()), ticket_id=ticket_id, author="SRE-Agent",
+                content=f"**PR already exists:** [{branch_name}]({pr_url})\n\nTicket awaiting validation."
+            ))
+            db.commit()
+            db.close()
+            return f"PR already exists: {pr_url}"
+
+        # Sanitize title: remove newlines, limit length
+        import re
+        title_desc = re.sub(r'[\r\n]+', ' ', t.veredicto[:70]) if t.veredicto else "Automatic fix"
+        pr_title = f"fix({ticket_id}): {title_desc}"
+
         pr_res = requests.post(f"{api_base}/pulls", headers=headers, json={
-            "title": f"fix({ticket_id}): {t.veredicto[:80] if t.veredicto else 'Correccion automatica'}",
+            "title": pr_title,
             "body": pr_body,
             "head": branch_name,
             "base": base_branch
@@ -599,25 +617,29 @@ def crear_pr_ticket(ticket_id: str) -> str:
             t.status = "AWAITING_VALIDATION"
             db.add(TicketThread(
                 id=str(uuid.uuid4()), ticket_id=ticket_id, author="SRE-Agent",
-                content=f"**PR creado:** [{branch_name}]({pr_url})\n\nTicket en espera de validacion."
+                content=f"**PR created:** [{branch_name}]({pr_url})\n\nTicket awaiting validation."
             ))
             db.commit()
             db.close()
-            return f"PR creado exitosamente: {pr_url}"
+            return f"PR created successfully: {pr_url}"
         else:
-            err = pr_res.json().get("message", str(pr_res.status_code))
+            resp_json = pr_res.json()
+            err = resp_json.get("message", str(pr_res.status_code))
+            errors_detail = resp_json.get("errors", [])
+            detail = "; ".join([e.get("message", str(e)) for e in errors_detail]) if errors_detail else ""
+            full_err = f"{err}. {detail}" if detail else err
             db.add(TicketThread(
                 id=str(uuid.uuid4()), ticket_id=ticket_id, author="SRE-Agent",
-                content=f"**Error al crear PR:** {err}\n\nRama: `{branch_name}`"
+                content=f"**Error creating PR:** {full_err}\n\nBranch: `{branch_name}`"
             ))
             db.commit()
             db.close()
-            return f"Error al crear PR: {err}"
+            return f"Error creating PR: {full_err}"
 
     except Exception as e:
         db.add(TicketThread(
             id=str(uuid.uuid4()), ticket_id=ticket_id, author="SRE-Agent",
-            content=f"**Error al crear PR:** {str(e)}"
+            content=f"**Error creating PR:** {str(e)}"
         ))
         db.commit()
         db.close()
