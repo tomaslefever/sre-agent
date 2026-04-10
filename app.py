@@ -10,7 +10,11 @@ from agent_engine import get_agent_executor, TECNICOS
 init_db()
 
 st.set_page_config(page_title="AgentX: SRE & Ticketing", page_icon="🎫", layout="wide")
-st.markdown('<script src="https://cdn.tailwindcss.com"></script>', unsafe_allow_html=True)
+st.markdown("""<style>
+    .block-container { padding-top: 1rem; }
+    [data-testid="stSidebar"] > div:first-child { padding-top: 1rem; }
+    header[data-testid="stHeader"] { display: none; }
+</style>""", unsafe_allow_html=True)
 
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
