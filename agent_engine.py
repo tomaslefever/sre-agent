@@ -250,18 +250,27 @@ def diagnostico_fast_track(ticket_id: str) -> str:
         db.close()
         return "Ticket no encontrado."
     
-    # 1. Buscar contexto
+    # 1. Buscar contexto con metadata
     v_store = get_vector_store()
     ctx = v_store.as_retriever(search_kwargs={"k": 10}).invoke(t.report)
-    context_text = "\n---\n".join([d.page_content for d in ctx]) if ctx else "Sin contexto disponible en la base de conocimiento."
-    
+
+    # Construir contexto CON metadata de archivo para que el LLM sepa la fuente
+    context_parts = []
+    for d in ctx:
+        src = d.metadata.get("source", d.metadata.get("metadata", {}).get("source", "desconocido"))
+        offset = d.metadata.get("start_index", "?")
+        context_parts.append(f"[ARCHIVO: {src} | offset:{offset}]\n{d.page_content}")
+    context_text = "\n---\n".join(context_parts) if context_parts else "Sin contexto disponible en la base de conocimiento."
+
     # 2. Prompt estructurado
     fast_llm = ChatOpenAI(model=os.getenv("OPENAI_MODEL", "gpt-4o"), temperature=0)
     messages = [
         SystemMessage(content="Eres un Ingeniero SRE Senior experto en diagnostico rapido de incidentes. Siempre respondes en JSON valido."),
-        HumanMessage(content=f"""Analiza este incidente usando el contexto del codigo/documentacion adjunto.
+        HumanMessage(content=f"""Analiza este incidente usando UNICAMENTE el contexto del codigo/documentacion adjunto.
 
-INCIDENTE REPORTADO:
+IMPORTANTE: Basa tu analisis SOLO en el codigo fuente proporcionado abajo. NO inventes archivos, logs ni informacion que no este en el contexto. Si un fragmento no es relevante al incidente, ignoralo.
+
+INCIDENTE REPORTADO (TICKET {ticket_id}):
 {t.report}
 
 CONTEXTO DE LA BASE DE CONOCIMIENTO (codigo y documentacion):
@@ -269,8 +278,8 @@ CONTEXTO DE LA BASE DE CONOCIMIENTO (codigo y documentacion):
 
 Responde UNICAMENTE con un JSON valido con estas claves:
 {{
-  "veredicto": "Explicacion tecnica detallada de la causa raiz, referenciando archivos y secciones del codigo donde identificaste el problema",
-  "archivos_revisados": ["lista de archivos que analizaste del contexto"],
+  "veredicto": "Explicacion tecnica detallada de la causa raiz, referenciando SOLO archivos y secciones del codigo que aparecen en el contexto proporcionado",
+  "archivos_revisados": ["lista de archivos del contexto que analizaste - usa los nombres exactos del campo ARCHIVO"],
   "hallazgos": ["lista de hallazgos especificos con referencia al archivo y fragmento de codigo donde encontraste cada problema"],
   "plan": "Pasos numerados y concretos para resolver el incidente, indicando que archivos modificar y que cambios hacer"
 }}""")
