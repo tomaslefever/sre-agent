@@ -312,83 +312,63 @@ if st.session_state.seccion == "Centro de Incidentes":
             else:
                 st.markdown(content)
 
-    # El dropzone colapsado flotando en el fondo pegado al input
-    up_file = None
-    try:
-        # st.container(bottom=True) hace que el contenedor se pegue abajo junto al chat input 
-        with st.container(bottom=True):
-            st.markdown("<style>div[data-testid='stFileUploader'] {margin-bottom: -15px;}</style>", unsafe_allow_html=True)
-            c_up, c_paste = st.columns([4, 1])
-            with c_up:
-                up_file = st.file_uploader("Evidencia", type=["txt", "log", "png", "jpg", "jpeg", "mp4"], label_visibility="collapsed")
-            with c_paste:
-                from streamlit_paste_button import paste_image_button
-                pase_res = paste_image_button("📋 Pegar Img", background_color="#262730")
-                if pase_res.image_data is not None:
-                    from io import BytesIO
-                    import time
-                    buff = BytesIO()
-                    pase_res.image_data.save(buff, format="PNG")
-                    buff.seek(0)
-                    class MockFile:
-                        def __init__(self, b):
-                            self.b = b
-                            self.name = f"clipboard_{int(time.time())}.png"
-                            self.type = "image/png"
-                        def read(self):
-                            return self.b.read()
-                    up_file = MockFile(buff)
-            
-            if up_file:
-                st.session_state.last_upload = {"name": up_file.name, "type": up_file.type}
-    except TypeError:
-        # Fallback si Streamlit es viejo
-        pass
-            
-    # Input y procesamiento del chat
-    cli_input = st.chat_input("Diagnostica un fallo o solicita un ticket...")
+    # Input y procesamiento del chat, con soporte nativo multimodal de Streamlit
+    prompt = st.chat_input("Escribe 'ayuda', diagnostica un fallo, pega(Ctrl+V) o adjunta evidencias...", accept_file=True, file_type=["txt", "log", "png", "jpg", "jpeg", "mp4"])
+    
     u_input = None
+    up_files = None
     
     if "run_agent_command" in st.session_state and st.session_state.run_agent_command:
         u_input = st.session_state.run_agent_command
         st.session_state.run_agent_command = None
-    elif cli_input:
-        u_input = cli_input
+    elif prompt:
+        u_input = prompt.text if hasattr(prompt, "text") and prompt.text else (prompt.get("text") if isinstance(prompt, dict) else prompt)
+        up_files = prompt.files if hasattr(prompt, "files") and prompt.files else (prompt.get("files") if isinstance(prompt, dict) else [])
         
-    if u_input:
+    if u_input or up_files:
         ctx = ""
         sys_msg = ""
-        if up_file:
-            if up_file.name.endswith((".log", ".txt")):
-                from langchain_text_splitters import RecursiveCharacterTextSplitter
-                from langchain_core.documents import Document
+        up_file_name_list = []
+        
+        # Procesar archivos adjuntos desde el chat multimodal
+        if up_files is not None and len(up_files) > 0:
+            for f in up_files:
+                up_file_name_list.append(f.name)
+                # Si arrastraremos al estado general para el tool de ticket
+                st.session_state.last_upload = {"name": f.name, "type": f.type}
                 
-                file_content = up_file.read().decode(errors='replace')
-                # 1. Separamos el log gigante en fracciones navegables (Chunks)
-                text_splitter = RecursiveCharacterTextSplitter(chunk_size=1200, chunk_overlap=150)
-                chunks = text_splitter.split_text(file_content)
-                docs = [Document(page_content=c, metadata={"source": up_file.name}) for c in chunks]
-                
-                # 2. Ingesta a Qdrant (Base de datos vectorial)
-                with st.spinner(f"Indexando archivo gigante de {len(chunks)} fragmentos en Qdrant..."):
-                    vector_store.add_documents(docs)
-                
-                # 3. Guardamos el mensaje de sistema a agregar al prompt
-                sys_msg = f"\n\n[SISTEMA: El usuario ha adjuntado el archivo log '{up_file.name}'. No está en este prompt. En su lugar, ha sido indexado en tu base vectorial (Qdrant). Usa de forma obligatoria tu herramienta 'buscar_conocimiento' para leer sus partes y responder a la pregunta del usuario.]"
-            else:
-                sys_msg = f"\n\n[SISTEMA: MULTIMEDIA ADJUNTA: {up_file.name}]"
+                if f.name.endswith((".log", ".txt")):
+                    from langchain_text_splitters import RecursiveCharacterTextSplitter
+                    from langchain_core.documents import Document
+                    
+                    file_content = f.read().decode(errors='replace')
+                    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1200, chunk_overlap=150)
+                    chunks = text_splitter.split_text(file_content)
+                    docs = [Document(page_content=c, metadata={"source": f.name}) for c in chunks]
+                    
+                    with st.spinner(f"Indexando {f.name} en Qdrant..."):
+                        vector_store.add_documents(docs)
+                    
+                    sys_msg += f"\n\n[SISTEMA: El usuario ha adjuntado el log '{f.name}'. Ha sido indexado en tu base vectorial (Qdrant). Obligatorio usar tu herramienta 'buscar_conocimiento' para analizarlo.]"
+                else:
+                    sys_msg += f"\n\n[SISTEMA: MULTIMEDIA ADJUNTA: {f.name}]"
+        
+        # Si no hubo input de texto, se puede disparar solo con el archivo
+        if not u_input:
+            u_input = "He adjuntado un archivo."
         
         full_input = u_input + sys_msg
         
         # Ocultar la parte de sistema en la UI en vivo
         with st.chat_message("user"): 
             st.markdown(u_input)
-            if up_file:
+            if up_file_name_list:
                 if st.session_state.debug_mode:
                     with st.expander("🔎 Info de Sistema (Debug)"):
                         st.caption(sys_msg)
                 else:
-                    st.caption(f"📎 *Evidencia vinculada: {up_file.name}*")
+                    for filename in up_file_name_list:
+                        st.caption(f"📎 *Evidencia vinculada: {filename}*")
         
         with st.chat_message("assistant"):
             with st.spinner("Analizando evidencia e infraestructura..."):
