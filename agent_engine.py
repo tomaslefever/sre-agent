@@ -130,7 +130,7 @@ def diagnostico_fast_track(ticket_id: str) -> str:
     context_text = "\n---\n".join([d.page_content for d in ctx]) if ctx else "Sin contexto disponible en la base de conocimiento."
     
     # 2. Prompt estructurado
-    fast_llm = ChatOpenAI(model="gpt-4o", temperature=0)
+    fast_llm = ChatOpenAI(model=os.getenv("OPENAI_MODEL", "gpt-4o"), temperature=0)
     messages = [
         SystemMessage(content="Eres un Ingeniero SRE Senior experto en diagnostico rapido de incidentes. Siempre respondes en JSON valido."),
         HumanMessage(content=f"""Analiza este incidente usando el contexto del codigo/documentacion adjunto.
@@ -203,7 +203,7 @@ def ejecutar_plan_accion(ticket_id: str) -> str:
 tools = [buscar_conocimiento, listar_archivos_conocimiento, leer_archivo_conocimiento, leer_ticket, crear_ticket_sre, actualizar_veredicto, generar_plan_accion, diagnostico_fast_track, ejecutar_plan_accion]
 
 def get_agent_executor():
-    llm = ChatOpenAI(model="gpt-4o", temperature=0)
+    llm = ChatOpenAI(model=os.getenv("OPENAI_MODEL", "gpt-4o"), temperature=0)
     prompt = ChatPromptTemplate.from_messages([
         ("system", """Eres AgentX, un Ingeniero SRE L1/L2 automatizado.
 Técnicos disponibles: Alex SRE, Sonia DevOps, Carlos Cloud, Marta Security.
@@ -227,7 +227,7 @@ def analyze_image_with_vision(image_b64: str, mime_type: str, user_text: str = "
     """Usa GPT-4o Vision directamente para analizar una imagen y devuelve una descripción técnica en texto."""
     from langchain_core.messages import HumanMessage
     
-    vision_llm = ChatOpenAI(model="gpt-4o", temperature=0, max_tokens=1500)
+    vision_llm = ChatOpenAI(model=os.getenv("OPENAI_MODEL", "gpt-4o"), temperature=0, max_tokens=1500)
     
     content_blocks = []
     if user_text:
