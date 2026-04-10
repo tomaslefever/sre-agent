@@ -312,9 +312,21 @@ if st.session_state.seccion == "Centro de Incidentes":
             else:
                 st.markdown(content)
 
-    # Input y procesamiento del chat, con soporte nativo multimodal de Streamlit
-    prompt = st.chat_input("Escribe 'ayuda', diagnostica un fallo, pega(Ctrl+V) o adjunta evidencias...", accept_file=True, file_type=["txt", "log", "png", "jpg", "jpeg", "mp4"])
+    # Input y procesamiento del chat, con soporte nativo multimodal de Streamlit (1.39+)
+    # Eliminamos el filtro estricto de file_type para facilitar el pegado de portapapeles
+    prompt = st.chat_input("Escribe 'ayuda', diagnostica un fallo o pega imágenes (Ctrl+V)...", accept_file=True)
     
+    # CSS Hack para intentar mejorar la receptividad del área de chat al pegado
+    st.markdown("""
+        <style>
+        div[data-testid="stChatInput"] {
+            border: 1px solid rgba(250, 250, 250, 0.2);
+            border-radius: 10px;
+        }
+        /* Intentar forzar que el contenedor de chat input capture el foco para eventos de sistema */
+        </style>
+    """, unsafe_allow_html=True)
+
     u_input = None
     up_files = None
     
@@ -322,6 +334,10 @@ if st.session_state.seccion == "Centro de Incidentes":
         u_input = st.session_state.run_agent_command
         st.session_state.run_agent_command = None
     elif prompt:
+        if st.session_state.debug_mode:
+            st.write(f"DEBUG: Prompt type: {type(prompt)}")
+            st.write(f"DEBUG: Prompt content: {prompt}")
+            
         u_input = prompt.text if hasattr(prompt, "text") and prompt.text else (prompt.get("text") if isinstance(prompt, dict) else prompt)
         up_files = prompt.files if hasattr(prompt, "files") and prompt.files else (prompt.get("files") if isinstance(prompt, dict) else [])
         
