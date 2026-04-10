@@ -650,6 +650,11 @@ REGLAS DE INFORME:
 - SIEMPRE indica las secciones/lineas/offsets donde encontraste problemas.
 - Genera un informe estructurado: Archivos Revisados -> Hallazgos -> Veredicto -> Plan.
 
+AISLAMIENTO DE DATOS:
+- La base vectorial contiene SOLO codigo de repositorios GitHub sincronizados. Usala libremente.
+- NO tienes acceso a datos de otros tickets o sesiones. Solo trabaja con la informacion del incidente actual.
+- Los adjuntos (imagenes, logs) se te proporcionan como parte del mensaje del usuario.
+
 Si te dan una descripcion de imagen/captura, analiza la evidencia visual.
 Si te dan un ID de ticket, usa 'leer_ticket' primero."""),
         ("placeholder", "{chat_history}"),
