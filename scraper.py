@@ -67,7 +67,24 @@ def sync_github_repo(repo_url: str):
                     
     if docs:
         vector_store = get_qdrant()
-        # Idealmente limpiaríamos el repo viejo en Qdrant, pero para hackathon simplemente adosamos.
+        # 1. Eliminar versiones antiguas del repo en base vectorial para evitar duplicidad de búsquedas
+        from qdrant_client.models import Filter, FieldCondition, MatchValue
+        try:
+            vector_store.client.delete(
+                collection_name="kb_sre",
+                points_selector=Filter(
+                    must=[
+                        FieldCondition(
+                            key="metadata.repo",
+                            match=MatchValue(value=repo_url)
+                        )
+                    ]
+                )
+            )
+        except Exception:
+            pass # Si falla o es la primera vez, ignorar
+            
+        # 2. Agregar los nuevos documentos actualizados al espacio liberado
         vector_store.add_documents(docs)
         
     return {"status": "ok", "docs_indexed": len(docs)}
