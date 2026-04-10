@@ -1,6 +1,6 @@
 import os
 from datetime import datetime
-from sqlalchemy import create_engine, Column, String, DateTime, Text, ForeignKey, JSON, text
+from sqlalchemy import create_engine, Column, String, DateTime, Text, LargeBinary, ForeignKey, JSON, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
@@ -34,6 +34,7 @@ class Attachment(Base):
     ticket_id = Column(String, ForeignKey("tickets.id"))
     filename = Column(String)
     file_type = Column(String)
+    file_data = Column(LargeBinary, nullable=True)
 
 class Repository(Base):
     __tablename__ = "repositories"
@@ -48,5 +49,6 @@ def init_db():
             conn.execute(text("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS veredicto TEXT;"))
             conn.execute(text("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS planes_accion JSON DEFAULT '[]'::json;"))
             conn.execute(text("CREATE TABLE IF NOT EXISTS repositories (id TEXT PRIMARY KEY, url TEXT, last_updated TIMESTAMP);"))
+            conn.execute(text("ALTER TABLE attachments ADD COLUMN IF NOT EXISTS file_data BYTEA;"))
     except Exception:
         pass
