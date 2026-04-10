@@ -37,8 +37,6 @@ with st.sidebar:
 # --- SECCIÓN: CENTRO DE INCIDENTES ---
 if st.session_state.seccion == "Centro de Incidentes":
     st.header("🕵️ Centro de Diagnóstico")
-    
-    # Historial de Chat
     from langchain_community.chat_message_histories import SQLChatMessageHistory
     from langchain_core.runnables.history import RunnableWithMessageHistory
     from database import DB_URL
@@ -51,25 +49,17 @@ if st.session_state.seccion == "Centro de Incidentes":
         history_messages_key="chat_history"
     )
 
-    # Mostrar mensajes previos
     history = SQLChatMessageHistory(session_id=st.session_state.session_id, connection_string=DB_URL)
     for msg in history.messages:
         role = "user" if msg.type == "human" else "assistant"
         with st.chat_message(role):
             st.markdown(msg.content)
 
-    # Input Multimodal (Streamlit 1.39+)
     u_input = st.chat_input("Describe el incidente o pega un log...", accept_file=True)
     if u_input:
-        f = u_input.get("file")
         text = u_input.get("text", "")
-        
-        # Lógica de procesamiento de archivos (simplificada aquí para brevedad)
-        # ... (podría moverse a agent_engine también)
-        
         with st.chat_message("user"):
             st.markdown(text)
-        
         with st.chat_message("assistant"):
             with st.spinner("AgentX analizando..."):
                 res = agent_with_memory.invoke(
@@ -82,39 +72,29 @@ if st.session_state.seccion == "Centro de Incidentes":
 elif st.session_state.seccion == "Tablero de Tickets":
     st.header("📋 SRE Kanban Board")
     db = SessionLocal()
-    
     try:
         if st.session_state.selected_ticket:
-            # VISTA DETALLE
             t_id = st.session_state.selected_ticket
             t = db.query(Ticket).filter(Ticket.id == t_id).first()
-            
             if st.button("⬅️ Regresar al Tablero"):
                 st.session_state.selected_ticket = None
                 st.rerun()
-                
             if t:
                 st.subheader(f"🎫 {t_id}")
                 st.markdown(f"**Estado:** `{t.status}` | **Asignado:** `{t.assigned_to}`")
-                
                 c1, c2 = st.columns([2, 1])
                 with c1:
                     with st.expander("📝 Reporte Original", expanded=True):
                         st.write(t.report)
-                    
                     if t.veredicto:
                         st.success(f"⚖️ **Veredicto:**\n{t.veredicto}")
-                    
                     st.divider()
                     st.markdown("#### 💬 Historial y Comentarios")
                     hilos = db.query(TicketThread).filter(TicketThread.ticket_id == t_id).order_by(TicketThread.timestamp.asc()).all()
-                    if not hilos:
-                        st.info("No hay comentarios aún.")
                     for h in hilos:
                         with st.chat_message("assistant" if h.author == "SRE-Agent" else "user"):
                             st.caption(f"{h.author} - {h.timestamp.strftime('%Y-%m-%d %H:%M')}")
                             st.write(h.content)
-                    
                     with st.form(key=f"form_hilo_{t_id}", clear_on_submit=True):
                         nuevo_txt = st.text_area("Añadir comentario...")
                         if st.form_submit_button("Enviar"):
@@ -122,42 +102,27 @@ elif st.session_state.seccion == "Tablero de Tickets":
                                 db.add(TicketThread(id=str(uuid.uuid4()), ticket_id=t_id, author="SRE-Admin", content=nuevo_txt))
                                 db.commit()
                                 st.rerun()
-                
                 with c2:
                     st.markdown("#### ⚙️ Gestión de Incidente")
                     if st.button("⚡ Fast-Track IA", use_container_width=True):
                         from agent_engine import diagnostico_fast_track
-                        with st.spinner("Ejecutando diagnóstico rápido..."):
-                            res = diagnostico_fast_track.invoke({"ticket_id": t_id})
-                            st.toast(res)
-                            st.rerun()
-                    
+                        res = diagnostico_fast_track.invoke({"ticket_id": t_id})
+                        st.toast(res)
+                        st.rerun()
                     if st.button("🚀 Ejecutar Plan", use_container_width=True, type="primary"):
                         from agent_engine import ejecutar_plan_accion
-                        with st.spinner("Automatizando resolución..."):
-                            res = ejecutar_plan_accion.invoke({"ticket_id": t_id})
-                            st.toast(res)
-                            st.rerun()
-                            
-                    if t.status != "RESOLVED":
-                        if st.button("✅ Marcar como Resuelto", use_container_width=True):
-                            t.status = "RESOLVED"
-                            db.commit()
-                            st.rerun()
+                        res = ejecutar_plan_accion.invoke({"ticket_id": t_id})
+                        st.toast(res)
+                        st.rerun()
             else:
-                st.error("No se encontró el ticket seleccionado.")
                 st.session_state.selected_ticket = None
         else:
-            # VISTA KANBAN
             cols = st.columns(4)
             estados = [("Abierto", "ABIERTOS"), ("IN_PROGRESS", "PROGRESO"), ("PENDING_NOTIF", "REVISIÓN"), ("RESOLVED", "RESUELTOS")]
-            
             for i, (est_id, label) in enumerate(estados):
                 with cols[i]:
                     st.markdown(f"### {label}")
                     tkts = db.query(Ticket).filter(Ticket.status == est_id).all()
-                    if not tkts:
-                        st.caption("Vacío")
                     for tk in tkts:
                         with st.container(border=True):
                             st.markdown(f"**{tk.id}**")
@@ -172,12 +137,27 @@ elif st.session_state.seccion == "Tablero de Tickets":
 elif st.session_state.seccion == "Base de Conocimiento":
     st.header("📚 GitHub Knowledge Base")
     db = SessionLocal()
-    repos = db.query(Repository).all()
-    for r in repos:
-        st.write(f"🔗 {r.url} (Actualizado: {r.last_updated})")
-    
-    new_repo = st.text_input("Agregar Repo GitHub (URL)")
-    if st.button("Sincronizar"):
-        # Lógica de sincronización
-        st.success("Repo agregado!")
-    db.close()
+    try:
+        repos = db.query(Repository).all()
+        for r in repos:
+            with st.container(border=True):
+                c1, c2 = st.columns([3, 1])
+                c1.write(f"🔗 **{r.url}**")
+                c1.caption(f"Actualizado: {r.last_updated}")
+                if c2.button("🔄 Actualizar", key=f"upd_{r.id}", use_container_width=True):
+                    r.last_updated = datetime.utcnow()
+                    db.commit()
+                    st.toast("Actualización iniciada...")
+                    st.rerun()
+        st.divider()
+        st.markdown("#### Vincular nuevo repositorio")
+        url_input = st.text_input("GitHub URL")
+        if st.button("📥 Sincronizar Nuevo", type="primary"):
+            if url_input:
+                new_r = Repository(id=str(uuid.uuid4()), url=url_input, last_updated=datetime.utcnow())
+                db.add(new_r)
+                db.commit()
+                st.success("¡Vínculo exitoso!")
+                st.rerun()
+    finally:
+        db.close()
