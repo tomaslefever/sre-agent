@@ -11,9 +11,10 @@ init_db()
 
 st.set_page_config(page_title="AgentX: SRE & Ticketing", page_icon="🎫", layout="wide")
 st.markdown("""<style>
-    .block-container { padding-top: 1rem; }
+    .block-container { padding-top: 1rem; padding-bottom: 5rem; }
     [data-testid="stSidebar"] > div:first-child { padding-top: 1rem; }
     header[data-testid="stHeader"] { display: none; }
+    [data-testid="stBottom"] { position: fixed; bottom: 0; width: 100%; z-index: 999; }
 </style>""", unsafe_allow_html=True)
 
 if "session_id" not in st.session_state:
