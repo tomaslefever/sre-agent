@@ -7,6 +7,7 @@ langchain-qdrant
 arize-phoenix
 openinference-instrumentation-langchain
 streamlit>=1.56.0
+streamlit-chat-prompt
 psycopg2-binary
 SQLAlchemy
 pandas

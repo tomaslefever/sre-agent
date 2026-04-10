@@ -56,38 +56,40 @@ if st.session_state.seccion == "Centro de Incidentes":
         with st.chat_message(role):
             st.markdown(msg.content)
 
-    u_input = st.chat_input(
-        "Describe el incidente o pega una captura (Ctrl+V)...",
-        accept_file="multiple"
+    from streamlit_chat_prompt import prompt as chat_prompt
+
+    response = chat_prompt(
+        name="incident_chat",
+        key="incident_chat",
+        placeholder="Describe el incidente o pega una captura (Ctrl+V)...",
+        main_bottom=True,
+        max_image_size=10 * 1024 * 1024,
     )
-    if u_input:
-        text = u_input.text or ""
-        uploaded_files = u_input.files or []
+    if response:
+        text = response.text or ""
+        images = response.images or []
 
-        all_files = list(uploaded_files)
-
-        # Fase 1: Pre-procesar archivos
+        # Fase 1: Pre-procesar imágenes (ya vienen en base64)
         image_descriptions = []
-        file_texts = []
         display_images = []
 
-        for f in all_files:
-            f_bytes = f.read()
-            if f.type and f.type.startswith("image/"):
-                img_b64 = base64.b64encode(f_bytes).decode()
-                display_images.append((f.name, f_bytes, f.type))
-                try:
-                    from agent_engine import analyze_image_with_vision
-                    desc = analyze_image_with_vision(img_b64, f.type, text)
-                    image_descriptions.append(f"[ANÁLISIS VISUAL de '{f.name}']:\n{desc}")
-                except Exception as e:
-                    image_descriptions.append(f"[ERROR al analizar imagen '{f.name}': {str(e)}]")
-            else:
-                try:
-                    txt = f_bytes.decode("utf-8")
-                    file_texts.append(f"[CONTENIDO de '{f.name}']:\n{txt}")
-                except:
-                    file_texts.append(f"[ARCHIVO '{f.name}' adjunto (binario, no legible)]")
+        for i, img in enumerate(images):
+            img_name = f"imagen_{i+1}.png"
+            img_b64 = img.data
+            mime_type = img.type or "image/png"
+            # Decodificar para mostrar en UI
+            try:
+                img_bytes = base64.b64decode(img_b64)
+            except Exception:
+                img_bytes = None
+            if img_bytes:
+                display_images.append((img_name, img_bytes, mime_type))
+            try:
+                from agent_engine import analyze_image_with_vision
+                desc = analyze_image_with_vision(img_b64, mime_type, text)
+                image_descriptions.append(f"[ANÁLISIS VISUAL de '{img_name}']:\n{desc}")
+            except Exception as e:
+                image_descriptions.append(f"[ERROR al analizar imagen '{img_name}': {str(e)}]")
 
         # Fase 2: Construir el input completo para el agente
         parts = []
@@ -95,8 +97,6 @@ if st.session_state.seccion == "Centro de Incidentes":
             parts.append(text)
         for desc in image_descriptions:
             parts.append(desc)
-        for ft in file_texts:
-            parts.append(ft)
         if not parts:
             parts.append("El usuario ha adjuntado archivos sin mensaje adicional.")
 
@@ -108,8 +108,6 @@ if st.session_state.seccion == "Centro de Incidentes":
                 st.markdown(text)
             for name, img_bytes, mime in display_images:
                 st.image(img_bytes, caption=f"📷 {name}")
-            for ft in file_texts:
-                st.caption("📎 Archivo adjunto")
 
         # Fase 3: Enviar al agente
         with st.chat_message("assistant"):
