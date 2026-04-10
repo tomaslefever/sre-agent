@@ -28,6 +28,74 @@ def get_vector_store():
         pass
     return QdrantVectorStore(client=client, collection_name="kb_sre", embedding=embeddings)
 
+
+def diagnosticar_qdrant() -> dict:
+    """Inspecciona Qdrant y devuelve un informe del estado de la base vectorial."""
+    q_url = os.getenv("QDRANT_URL", "http://qdrant-db:6333")
+    client = QdrantClient(url=q_url)
+    
+    result = {
+        "collection_exists": False,
+        "total_points": 0,
+        "archivos": {},
+        "metadata_keys": set(),
+        "sample_payloads": []
+    }
+    
+    try:
+        if not client.collection_exists("kb_sre"):
+            return result
+        
+        result["collection_exists"] = True
+        info = client.get_collection("kb_sre")
+        result["total_points"] = info.points_count
+        
+        # Obtener sample de puntos para inspeccionar estructura
+        all_points = []
+        offset = None
+        while True:
+            batch, next_offset = client.scroll(
+                collection_name="kb_sre", limit=100, with_payload=True, offset=offset
+            )
+            all_points.extend(batch)
+            if next_offset is None or len(all_points) >= 500:
+                break
+            offset = next_offset
+        
+        for p in all_points:
+            payload = p.payload or {}
+            # Recoger todas las claves de metadata
+            result["metadata_keys"].update(payload.keys())
+            if "metadata" in payload and isinstance(payload["metadata"], dict):
+                result["metadata_keys"].update(f"metadata.{k}" for k in payload["metadata"].keys())
+            
+            # Extraer nombre de archivo
+            src = (
+                payload.get("source") 
+                or payload.get("metadata", {}).get("source") 
+                or "SIN_FUENTE"
+            )
+            result["archivos"][src] = result["archivos"].get(src, 0) + 1
+        
+        # Sample de los primeros 3 payloads para debug
+        for p in all_points[:3]:
+            sample = {}
+            payload = p.payload or {}
+            for k, v in payload.items():
+                if k == "page_content" or k == "content":
+                    sample[k] = str(v)[:200] + "..."
+                else:
+                    sample[k] = v
+            result["sample_payloads"].append(sample)
+        
+        result["metadata_keys"] = list(result["metadata_keys"])
+        
+    except Exception as e:
+        result["error"] = str(e)
+    
+    return result
+
+
 @tool
 def buscar_conocimiento(query: str) -> str:
     """Busca en la base de conocimiento vectorial. Devuelve fragmentos con archivo fuente y lineas."""

@@ -255,3 +255,42 @@ elif st.session_state.seccion == "Base de Conocimiento":
                 st.rerun()
     finally:
         db.close()
+    
+    # --- DIAGNÓSTICO QDRANT ---
+    st.divider()
+    st.markdown("#### 🔬 Diagnóstico de Base Vectorial (Qdrant)")
+    if st.button("🩺 Inspeccionar Qdrant", use_container_width=True):
+        from agent_engine import diagnosticar_qdrant
+        with st.spinner("Inspeccionando colección kb_sre..."):
+            diag = diagnosticar_qdrant()
+        
+        if not diag["collection_exists"]:
+            st.error("❌ La colección `kb_sre` NO existe en Qdrant.")
+        elif diag["total_points"] == 0:
+            st.warning("⚠️ La colección existe pero está VACÍA (0 puntos). No hay código indexado.")
+        else:
+            st.success(f"✅ Colección activa: **{diag['total_points']} vectores** indexados")
+            
+            # Archivos indexados
+            archivos = diag.get("archivos", {})
+            if archivos:
+                st.markdown(f"**📁 Archivos indexados ({len(archivos)}):**")
+                for nombre, count in sorted(archivos.items(), key=lambda x: -x[1]):
+                    st.text(f"  {nombre} → {count} chunks")
+            else:
+                st.warning("No se encontraron nombres de archivo en los metadatos.")
+            
+            # Claves de metadata
+            keys = diag.get("metadata_keys", [])
+            if keys:
+                st.markdown(f"**🔑 Claves de metadata:** `{', '.join(sorted(keys))}`")
+            
+            # Sample payloads
+            samples = diag.get("sample_payloads", [])
+            if samples:
+                with st.expander("🧪 Sample de payloads (primeros 3 puntos)", expanded=False):
+                    for i, s in enumerate(samples):
+                        st.json(s)
+        
+        if "error" in diag:
+            st.error(f"Error: {diag['error']}")
