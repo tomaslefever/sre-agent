@@ -56,21 +56,34 @@ if st.session_state.seccion == "Centro de Incidentes":
         with st.chat_message(role):
             st.markdown(msg.content)
 
+    # Uploader de respaldo para imágenes/archivos
+    with st.expander("📎 Adjuntar archivos manualmente", expanded=False):
+        manual_files = st.file_uploader(
+            "Subir capturas, logs o archivos",
+            accept_multiple_files=True,
+            type=["png", "jpg", "jpeg", "gif", "webp", "txt", "log", "csv", "json", "pdf"],
+            key="manual_upload"
+        )
+
     u_input = st.chat_input(
         "Describe el incidente o pega una captura (Ctrl+V)...",
-        accept_file="multiple",
-        file_type=["png", "jpg", "jpeg", "gif", "webp", "txt", "log", "csv", "json"]
+        accept_file="multiple"
     )
     if u_input:
         text = u_input.text or ""
         uploaded_files = u_input.files or []
+        
+        # Combinar archivos del chat_input y del uploader manual
+        all_files = list(uploaded_files)
+        if manual_files:
+            all_files.extend(manual_files)
         
         # Fase 1: Pre-procesar archivos
         image_descriptions = []
         file_texts = []
         display_images = []
         
-        for f in uploaded_files:
+        for f in all_files:
             f_bytes = f.read()
             if f.type and f.type.startswith("image/"):
                 # Convertir a base64 y analizar con GPT-4o Vision
