@@ -56,15 +56,6 @@ if st.session_state.seccion == "Centro de Incidentes":
         with st.chat_message(role):
             st.markdown(msg.content)
 
-    # Uploader de respaldo para imágenes/archivos
-    with st.expander("📎 Adjuntar archivos manualmente", expanded=False):
-        manual_files = st.file_uploader(
-            "Subir capturas, logs o archivos",
-            accept_multiple_files=True,
-            type=["png", "jpg", "jpeg", "gif", "webp", "txt", "log", "csv", "json", "pdf"],
-            key="manual_upload"
-        )
-
     u_input = st.chat_input(
         "Describe el incidente o pega una captura (Ctrl+V)...",
         accept_file="multiple"
@@ -73,10 +64,7 @@ if st.session_state.seccion == "Centro de Incidentes":
         text = u_input.text or ""
         uploaded_files = u_input.files or []
 
-        # Combinar archivos del chat_input y del uploader manual
         all_files = list(uploaded_files)
-        if manual_files:
-            all_files.extend(manual_files)
 
         # Fase 1: Pre-procesar archivos
         image_descriptions = []
