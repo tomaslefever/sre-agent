@@ -108,7 +108,46 @@ def buscar_conocimiento(query: str) -> str:
     for d in docs:
         origen = d.metadata.get("source", "kb_general")
         resultados.append(f"[{origen}]: {d.page_content}")
-    return "\n\n---\n\n".join(resultados) if resultados else "No se encontró coincidencia."
+    return "\n\n---\n\n".join(resultados) if resultados else "No se encontró coincidencia relevante."
+
+@tool
+def listar_archivos_conocimiento(repo_filtro: str = None) -> str:
+    """Devuelve la lista de archivos únicos indexados en la base de conocimiento. Úsala para saber qué archivos puedes leer."""
+    qdrant_url = os.getenv("QDRANT_URL", "http://qdrant-db:6333")
+    client = QdrantClient(url=qdrant_url)
+    
+    # Scroll para obtener metadata única (limitado a 100 para velocidad)
+    pages = client.scroll(collection_name="kb_sre", limit=100, with_payload=True)[0]
+    archivos = set()
+    for p in pages:
+        src = p.payload.get("source", "desconocido")
+        if not repo_filtro or (repo_filtro in src):
+            archivos.add(src)
+    
+    if not archivos:
+        return "No hay archivos indexados aún en la base de conocimiento."
+    return "Archivos disponibles:\n- " + "\n- ".join(sorted(list(archivos)))
+
+@tool
+def leer_archivo_conocimiento(nombre_archivo: str) -> str:
+    """Recupera el contenido completo (o pedazos principales) de un archivo específico por su nombre exacto obtenido de 'listar_archivos_conocimiento'."""
+    from qdrant_client.models import Filter, FieldCondition, MatchValue
+    qdrant_url = os.getenv("QDRANT_URL", "http://qdrant-db:6333")
+    client = QdrantClient(url=qdrant_url)
+    
+    res = client.scroll(
+        collection_name="kb_sre",
+        scroll_filter=Filter(must=[FieldCondition(key="metadata.source", match=MatchValue(value=nombre_archivo))]),
+        limit=20,
+        with_payload=True
+    )[0]
+    
+    if not res:
+        return f"No se encontró el archivo '{nombre_archivo}'."
+    
+    # Unir los chunks en orden (si tienen index) o simplemente concatenar
+    contenido = "\n[Continuación...]\n".join([p.payload.get("page_content", "") for p in res])
+    return f"Contenido de {nombre_archivo}:\n\n{contenido}"
 
 @tool
 def crear_ticket_sre(reporte: str, autor: str, asignado: str = None) -> str:
@@ -214,7 +253,7 @@ def generar_plan_accion(ticket_id: str, nuevo_plan: str) -> str:
     db.close()
     return f"❌ Ticket {ticket_id} no encontrado."
 
-tools = [buscar_conocimiento, crear_ticket_sre, asignar_ticket, notificar_soporte, notificar_usuario, resolver_ticket, actualizar_veredicto, generar_plan_accion]
+tools = [buscar_conocimiento, listar_archivos_conocimiento, leer_archivo_conocimiento, crear_ticket_sre, asignar_ticket, notificar_soporte, notificar_usuario, resolver_ticket, actualizar_veredicto, generar_plan_accion]
 
 # ==========================================
 # 3. CEREBRO DEL AGENTE (RAG + GUARDRAILS)
@@ -228,8 +267,8 @@ prompt = ChatPromptTemplate.from_messages([
 Técnicos disponibles en Jira/Linear: {', '.join(TECNICOS)}.
 
 Tus funciones E2E obligatorias:
-1. Extraer gravedad y sistema afectado del input del usuario.
-2. Usar RAG obligatoriamente (buscar_conocimiento) si el usuario adjunta un log o un error.
+1. Extraer gravedad y sistema afectado.
+2. Usar RAG obligatoriamente: Primero LISTA los archivos (listar_archivos_conocimiento), luego BUSCA (buscar_conocimiento) y finalmente LEE los archivos clave (leer_archivo_conocimiento) para entender el código fuente antes de proponer nada.
 3. Crear tickets formateados usando tus herramientas.
 4. Generar y actualizar el 'Análisis y Veredicto' (actualizar_veredicto) y el 'Plan de Ejecución' (generar_plan_accion) del ticket conforme obtengas información del RAG.
 5. Notificar a soporte y notificar al reportador al crear tickets.
