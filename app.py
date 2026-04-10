@@ -166,9 +166,17 @@ elif st.session_state.seccion == "Tablero de Tickets":
                         st.warning("⚠️ Sin veredicto aún. Ejecuta un **Fast-Track IA** para diagnosticar.")
 
                     # Planes de Acción con botones integrados
+                    st.markdown("#### 🗺️ Planes de Acción")
                     planes = list(t.planes_accion) if t.planes_accion else []
+                    if t.status != "AWAITING_VALIDATION":
+                        if st.button("⚡ Generar Plan de Acción", use_container_width=True, type="primary"):
+                            from agent_engine import diagnostico_fast_track
+                            with st.spinner("🧠 Analizando con IA y generando plan..."):
+                                resultado = diagnostico_fast_track.invoke({"ticket_id": t_id})
+                            st.success("Plan generado")
+                            st.info(resultado)
+                            st.button("🔄 Recargar vista", key="reload_ft", on_click=lambda: st.rerun())
                     if planes:
-                        st.markdown("#### 🗺️ Planes de Acción")
                         for idx, p in enumerate(reversed(planes)):
                             v_num = p.get('version', '?')
                             with st.expander(f"Plan V{v_num} — {p.get('fecha', '')[:10]}", expanded=(idx == 0)):
@@ -231,14 +239,6 @@ elif st.session_state.seccion == "Tablero de Tickets":
 
                     if t.status == "AWAITING_VALIDATION":
                         st.warning("⏳ **En espera de validación**\nHay un PR abierto pendiente de revisión.")
-                    else:
-                        if st.button("⚡ Fast-Track IA", use_container_width=True):
-                            from agent_engine import diagnostico_fast_track
-                            with st.spinner("🧠 Analizando con IA..."):
-                                resultado = diagnostico_fast_track.invoke({"ticket_id": t_id})
-                            st.success("Diagnóstico completado")
-                            st.info(resultado)
-                            st.button("🔄 Recargar vista", on_click=lambda: st.rerun())
 
                     if t.status not in ("RESOLVED", "Resuelto"):
                         if st.button("✅ Marcar como Resuelto", use_container_width=True):
