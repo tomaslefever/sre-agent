@@ -250,10 +250,23 @@ def generar_plan_accion(ticket_id: str, nuevo_plan: str) -> str:
         db.commit()
         db.close()
         return f"✅ Plan de acción (Versión {nueva_version}) generado para el ticket {ticket_id}."
+@tool
+def leer_ticket(ticket_id: str) -> str:
+    """Lee toda la información actual de un ticket de la base de datos: reporte, veredicto, autor y planes previos."""
+    db = SessionLocal()
+    t = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+    if t:
+        info = f"ID: {t.id}\nStatus: {t.status}\nAutor: {t.author}\nAsignado: {t.assigned_to}\nReporte original: {t.report}\nVeredicto actual: {t.veredicto or 'Sin veredicto'}\n"
+        planes = t.planes_accion if t.planes_accion else []
+        info += f"Planes de acción ({len(planes)} versiones).\n"
+        if planes:
+            info += f"Último Plan: {planes[-1]['plan']}"
+        db.close()
+        return info
     db.close()
     return f"❌ Ticket {ticket_id} no encontrado."
 
-tools = [buscar_conocimiento, listar_archivos_conocimiento, leer_archivo_conocimiento, crear_ticket_sre, asignar_ticket, notificar_soporte, notificar_usuario, resolver_ticket, actualizar_veredicto, generar_plan_accion]
+tools = [buscar_conocimiento, listar_archivos_conocimiento, leer_archivo_conocimiento, leer_ticket, crear_ticket_sre, asignar_ticket, notificar_soporte, notificar_usuario, resolver_ticket, actualizar_veredicto, generar_plan_accion]
 
 # ==========================================
 # 3. CEREBRO DEL AGENTE (RAG + GUARDRAILS)
@@ -267,9 +280,9 @@ prompt = ChatPromptTemplate.from_messages([
 Técnicos disponibles en Jira/Linear: {', '.join(TECNICOS)}.
 
 Tus funciones E2E obligatorias:
-1. Extraer gravedad y sistema afectado.
-2. Usar RAG obligatoriamente: Primero LISTA los archivos (listar_archivos_conocimiento), luego BUSCA (buscar_conocimiento) y finalmente LEE los archivos clave (leer_archivo_conocimiento) para entender el código fuente antes de proponer nada.
-3. Crear tickets formateados usando tus herramientas.
+1. Extraer gravedad y sistema afectado. Si te dan un ID de ticket, usa 'leer_ticket' primero.
+2. Usar RAG obligatoriamente: LISTA archivos, BUSCA y LEE el código fuente para entenderlo.
+3. Crear o actualizar tickets con veredictos y planes de acción detallados.
 4. Generar y actualizar el 'Análisis y Veredicto' (actualizar_veredicto) y el 'Plan de Ejecución' (generar_plan_accion) del ticket conforme obtengas información del RAG.
 5. Notificar a soporte y notificar al reportador al crear tickets.
 6. Si detectas la solución definitiva, usar la herramienta `resolver_ticket` para cerrar el ciclo completo.
