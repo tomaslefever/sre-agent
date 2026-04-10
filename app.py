@@ -187,25 +187,28 @@ elif st.session_state.seccion == "Tablero de Tickets":
                                 st.write(p.get("plan", "Sin detalle"))
 
                                 # Botones de acción dentro del plan
-                                btn_c1, btn_c2 = st.columns(2)
-                                with btn_c1:
-                                    if st.button(f"🚀 Ejecutar Plan V{v_num}", key=f"exec_plan_{v_num}", use_container_width=True, type="primary"):
-                                        from agent_engine import ejecutar_plan_accion
-                                        with st.spinner("🔧 Generando código en rama..."):
-                                            resultado = ejecutar_plan_accion.invoke({"ticket_id": t_id})
-                                        if "Error" in resultado:
-                                            st.error(resultado)
-                                        else:
-                                            st.success(resultado)
-                                with btn_c2:
-                                    if st.button(f"📬 Enviar PR V{v_num}", key=f"pr_plan_{v_num}", use_container_width=True):
-                                        from agent_engine import crear_pr_ticket
-                                        with st.spinner("📬 Creando Pull Request..."):
-                                            resultado_pr = crear_pr_ticket.invoke({"ticket_id": t_id})
-                                        if "Error" in resultado_pr:
-                                            st.error(resultado_pr)
-                                        else:
-                                            st.success(resultado_pr)
+                                if t.status == "AWAITING_VALIDATION":
+                                    st.info("⏳ PR enviado — ticket en espera de validación. Los planes están bloqueados.")
+                                else:
+                                    btn_c1, btn_c2 = st.columns(2)
+                                    with btn_c1:
+                                        if st.button(f"🚀 Ejecutar Plan V{v_num}", key=f"exec_plan_{v_num}", use_container_width=True, type="primary"):
+                                            from agent_engine import ejecutar_plan_accion
+                                            with st.spinner("🔧 Generando código en rama..."):
+                                                resultado = ejecutar_plan_accion.invoke({"ticket_id": t_id})
+                                            if "Error" in resultado:
+                                                st.error(resultado)
+                                            else:
+                                                st.success(resultado)
+                                    with btn_c2:
+                                        if st.button(f"📬 Enviar PR V{v_num}", key=f"pr_plan_{v_num}", use_container_width=True):
+                                            from agent_engine import crear_pr_ticket
+                                            with st.spinner("📬 Creando Pull Request..."):
+                                                resultado_pr = crear_pr_ticket.invoke({"ticket_id": t_id})
+                                            if "Error" in resultado_pr:
+                                                st.error(resultado_pr)
+                                            else:
+                                                st.success(resultado_pr)
 
                     st.divider()
                     st.markdown("#### 💬 Historial y Comentarios")
@@ -227,13 +230,16 @@ elif st.session_state.seccion == "Tablero de Tickets":
                 with c2:
                     st.markdown("#### ⚙️ Gestión de Incidente")
 
-                    if st.button("⚡ Fast-Track IA", use_container_width=True):
-                        from agent_engine import diagnostico_fast_track
-                        with st.spinner("🧠 Analizando con IA..."):
-                            resultado = diagnostico_fast_track.invoke({"ticket_id": t_id})
-                        st.success("Diagnóstico completado")
-                        st.info(resultado)
-                        st.button("🔄 Recargar vista", on_click=lambda: st.rerun())
+                    if t.status == "AWAITING_VALIDATION":
+                        st.warning("⏳ **En espera de validación**\nHay un PR abierto pendiente de revisión.")
+                    else:
+                        if st.button("⚡ Fast-Track IA", use_container_width=True):
+                            from agent_engine import diagnostico_fast_track
+                            with st.spinner("🧠 Analizando con IA..."):
+                                resultado = diagnostico_fast_track.invoke({"ticket_id": t_id})
+                            st.success("Diagnóstico completado")
+                            st.info(resultado)
+                            st.button("🔄 Recargar vista", on_click=lambda: st.rerun())
 
                     if t.status not in ("RESOLVED", "Resuelto"):
                         if st.button("✅ Marcar como Resuelto", use_container_width=True):
@@ -303,8 +309,8 @@ elif st.session_state.seccion == "Tablero de Tickets":
             else:
                 st.session_state.selected_ticket = None
         else:
-            cols = st.columns(4)
-            estados = [("Abierto", "ABIERTOS"), ("IN_PROGRESS", "PROGRESO"), ("PENDING_NOTIF", "REVISIÓN"), ("RESOLVED", "RESUELTOS")]
+            cols = st.columns(5)
+            estados = [("Abierto", "ABIERTOS"), ("IN_PROGRESS", "PROGRESO"), ("PENDING_NOTIF", "REVISIÓN"), ("AWAITING_VALIDATION", "VALIDACIÓN"), ("RESOLVED", "RESUELTOS")]
             for i, (est_id, label) in enumerate(estados):
                 with cols[i]:
                     st.markdown(f"### {label}")

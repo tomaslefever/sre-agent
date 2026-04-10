@@ -572,9 +572,10 @@ def crear_pr_ticket(ticket_id: str) -> str:
 
         if pr_res.status_code in (200, 201):
             pr_url = pr_res.json().get("html_url", "")
+            t.status = "AWAITING_VALIDATION"
             db.add(TicketThread(
                 id=str(uuid.uuid4()), ticket_id=ticket_id, author="SRE-Agent",
-                content=f"**PR creado:** [{branch_name}]({pr_url})"
+                content=f"**PR creado:** [{branch_name}]({pr_url})\n\nTicket en espera de validacion."
             ))
             db.commit()
             db.close()
