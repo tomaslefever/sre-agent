@@ -83,58 +83,90 @@ elif st.session_state.seccion == "Tablero de Tickets":
     st.header("📋 SRE Kanban Board")
     db = SessionLocal()
     
-    if st.session_state.selected_ticket:
-        # VISTA DETALLE
-        t_id = st.session_state.selected_ticket
-        t = db.query(Ticket).filter(Ticket.id == t_id).first()
-        if st.button("⬅️ Regresar"):
-            st.session_state.selected_ticket = None
-            st.rerun()
+    try:
+        if st.session_state.selected_ticket:
+            # VISTA DETALLE
+            t_id = st.session_state.selected_ticket
+            t = db.query(Ticket).filter(Ticket.id == t_id).first()
             
-        if t:
-            col1, col2 = st.columns([2, 1])
-            with col1:
-                st.subheader(f"Ticket: {t_id}")
-                st.info(f"**Reporte:**\n{t.report}")
-                st.divider()
-                st.markdown("#### 💬 Hilo de Seguimiento")
-                threads = db.query(TicketThread).filter(TicketThread.ticket_id == t_id).order_by(TicketThread.timestamp.asc()).all()
-                for th in threads:
-                    st.caption(f"**{th.author}** @ {th.timestamp.strftime('%H:%M')}")
-                    st.write(th.content)
+            if st.button("⬅️ Regresar al Tablero"):
+                st.session_state.selected_ticket = None
+                st.rerun()
                 
-                comment = st.text_area("Añadir actualización...")
-                if st.button("Comentar"):
-                    db.add(TicketThread(id=str(uuid.uuid4()), ticket_id=t_id, author="Usuario", content=comment))
-                    db.commit()
-                    st.rerun()
-            with col2:
-                st.markdown("#### ⚡ Acciones Rápidas")
-                if st.button("🚀 Fast-Track IA", use_container_width=True):
-                    st.info("Disparando análisis rápido...")
-                    # Aquí llamaríamos a la misma lógica de la herramienta
-                if st.button("✅ Resolver", use_container_width=True, type="primary"):
-                    t.status = "RESOLVED"
-                    db.commit()
-                    st.success("Ticket Resuelto!")
-                    st.rerun()
-    else:
-        # VISTA KANBAN
-        cols = st.columns(4)
-        estados = [("Abierto", "ABIERTOS"), ("IN_PROGRESS", "PROGRESO"), ("PENDING_NOTIF", "REVISIÓN"), ("RESOLVED", "RESUELTOS")]
-        
-        for i, (est_id, label) in enumerate(estados):
-            with cols[i]:
-                st.markdown(f"**{label}**")
-                tkts = db.query(Ticket).filter(Ticket.status == est_id).all()
-                for tk in tkts:
-                    with st.container(border=True):
-                        st.caption(tk.id)
-                        st.write(f"👤 {tk.assigned_to}")
-                        if st.button("👁️ Detalle", key=tk.id):
-                            st.session_state.selected_ticket = tk.id
+            if t:
+                st.subheader(f"🎫 {t_id}")
+                st.markdown(f"**Estado:** `{t.status}` | **Asignado:** `{t.assigned_to}`")
+                
+                c1, c2 = st.columns([2, 1])
+                with c1:
+                    with st.expander("📝 Reporte Original", expanded=True):
+                        st.write(t.report)
+                    
+                    if t.veredicto:
+                        st.success(f"⚖️ **Veredicto:**\n{t.veredicto}")
+                    
+                    st.divider()
+                    st.markdown("#### 💬 Historial y Comentarios")
+                    hilos = db.query(TicketThread).filter(TicketThread.ticket_id == t_id).order_by(TicketThread.timestamp.asc()).all()
+                    if not hilos:
+                        st.info("No hay comentarios aún.")
+                    for h in hilos:
+                        with st.chat_message("assistant" if h.author == "SRE-Agent" else "user"):
+                            st.caption(f"{h.author} - {h.timestamp.strftime('%Y-%m-%d %H:%M')}")
+                            st.write(h.content)
+                    
+                    with st.form(key=f"form_hilo_{t_id}", clear_on_submit=True):
+                        nuevo_txt = st.text_area("Añadir comentario...")
+                        if st.form_submit_button("Enviar"):
+                            if nuevo_txt:
+                                db.add(TicketThread(id=str(uuid.uuid4()), ticket_id=t_id, author="SRE-Admin", content=nuevo_txt))
+                                db.commit()
+                                st.rerun()
+                
+                with c2:
+                    st.markdown("#### ⚙️ Gestión de Incidente")
+                    if st.button("⚡ Fast-Track IA", use_container_width=True):
+                        from agent_engine import diagnostico_fast_track
+                        with st.spinner("Ejecutando diagnóstico rápido..."):
+                            res = diagnostico_fast_track.invoke({"ticket_id": t_id})
+                            st.toast(res)
                             st.rerun()
-    db.close()
+                    
+                    if st.button("🚀 Ejecutar Plan", use_container_width=True, type="primary"):
+                        from agent_engine import ejecutar_plan_accion
+                        with st.spinner("Automatizando resolución..."):
+                            res = ejecutar_plan_accion.invoke({"ticket_id": t_id})
+                            st.toast(res)
+                            st.rerun()
+                            
+                    if t.status != "RESOLVED":
+                        if st.button("✅ Marcar como Resuelto", use_container_width=True):
+                            t.status = "RESOLVED"
+                            db.commit()
+                            st.rerun()
+            else:
+                st.error("No se encontró el ticket seleccionado.")
+                st.session_state.selected_ticket = None
+        else:
+            # VISTA KANBAN
+            cols = st.columns(4)
+            estados = [("Abierto", "ABIERTOS"), ("IN_PROGRESS", "PROGRESO"), ("PENDING_NOTIF", "REVISIÓN"), ("RESOLVED", "RESUELTOS")]
+            
+            for i, (est_id, label) in enumerate(estados):
+                with cols[i]:
+                    st.markdown(f"### {label}")
+                    tkts = db.query(Ticket).filter(Ticket.status == est_id).all()
+                    if not tkts:
+                        st.caption("Vacío")
+                    for tk in tkts:
+                        with st.container(border=True):
+                            st.markdown(f"**{tk.id}**")
+                            st.caption(f"👤 {tk.assigned_to}")
+                            if st.button("📂 Ver Detalle", key=f"btn_{tk.id}", use_container_width=True):
+                                st.session_state.selected_ticket = tk.id
+                                st.rerun()
+    finally:
+        db.close()
 
 # --- SECCIÓN: CONOCIMIENTO ---
 elif st.session_state.seccion == "Base de Conocimiento":
