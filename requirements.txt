@@ -13,3 +13,4 @@ pandas
 requests
 fastapi
 uvicorn
+streamlit-paste-button

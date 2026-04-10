@@ -315,19 +315,35 @@ if st.session_state.seccion == "Centro de Incidentes":
     # El dropzone colapsado flotando en el fondo pegado al input
     up_file = None
     try:
-        # st.container(bottom=True) hace que el contenedor se pegue abajo junto al chat input (Streamlit > 1.30)
+        # st.container(bottom=True) hace que el contenedor se pegue abajo junto al chat input 
         with st.container(bottom=True):
             st.markdown("<style>div[data-testid='stFileUploader'] {margin-bottom: -15px;}</style>", unsafe_allow_html=True)
-            up_file = st.file_uploader("Evidencia", type=["txt", "log", "png", "jpg", "jpeg", "mp4"], label_visibility="collapsed")
+            c_up, c_paste = st.columns([4, 1])
+            with c_up:
+                up_file = st.file_uploader("Evidencia", type=["txt", "log", "png", "jpg", "jpeg", "mp4"], label_visibility="collapsed")
+            with c_paste:
+                from streamlit_paste_button import paste_image_button
+                pase_res = paste_image_button("📋 Pegar Img", background_color="#262730")
+                if pase_res.image_data is not None:
+                    from io import BytesIO
+                    import time
+                    buff = BytesIO()
+                    pase_res.image_data.save(buff, format="PNG")
+                    buff.seek(0)
+                    class MockFile:
+                        def __init__(self, b):
+                            self.b = b
+                            self.name = f"clipboard_{int(time.time())}.png"
+                            self.type = "image/png"
+                        def read(self):
+                            return self.b.read()
+                    up_file = MockFile(buff)
+            
             if up_file:
                 st.session_state.last_upload = {"name": up_file.name, "type": up_file.type}
     except TypeError:
-        # Fallback si Streamlit es una versión más antigua
-        with st.container():
-            st.markdown("<style>div[data-testid='stFileUploader'] {margin-bottom: -15px;}</style>", unsafe_allow_html=True)
-            up_file = st.file_uploader("Evidencia", type=["txt", "log", "png", "jpg", "jpeg", "mp4"], label_visibility="collapsed")
-            if up_file:
-                st.session_state.last_upload = {"name": up_file.name, "type": up_file.type}
+        # Fallback si Streamlit es viejo
+        pass
             
     # Input y procesamiento del chat
     cli_input = st.chat_input("Diagnostica un fallo o solicita un ticket...")
