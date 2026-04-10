@@ -604,10 +604,20 @@ def crear_pr_ticket(ticket_id: str) -> str:
             return f"PR creado exitosamente: {pr_url}"
         else:
             err = pr_res.json().get("message", str(pr_res.status_code))
+            db.add(TicketThread(
+                id=str(uuid.uuid4()), ticket_id=ticket_id, author="SRE-Agent",
+                content=f"**Error al crear PR:** {err}\n\nRama: `{branch_name}`"
+            ))
+            db.commit()
             db.close()
             return f"Error al crear PR: {err}"
 
     except Exception as e:
+        db.add(TicketThread(
+            id=str(uuid.uuid4()), ticket_id=ticket_id, author="SRE-Agent",
+            content=f"**Error al crear PR:** {str(e)}"
+        ))
+        db.commit()
         db.close()
         return f"Error: {str(e)}"
 

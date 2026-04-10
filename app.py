@@ -202,13 +202,19 @@ elif st.session_state.seccion == "Tablero de Tickets":
                                         if st.button(f"🚀 Ejecutar Plan V{v_num}", key=f"exec_plan_{v_num}", use_container_width=True, type="primary"):
                                             from agent_engine import ejecutar_plan_accion
                                             with st.spinner("🔧 Generando código en rama..."):
-                                                ejecutar_plan_accion.invoke({"ticket_id": t_id})
+                                                res_exec = ejecutar_plan_accion.invoke({"ticket_id": t_id})
+                                            if "Error" in res_exec:
+                                                db.add(TicketThread(id=str(uuid.uuid4()), ticket_id=t_id, author="SRE-Agent", content=f"**Error al ejecutar plan:** {res_exec}"))
+                                                db.commit()
                                             st.rerun()
                                     with btn_c2:
                                         if st.button(f"📬 Enviar PR V{v_num}", key=f"pr_plan_{v_num}", use_container_width=True):
                                             from agent_engine import crear_pr_ticket
                                             with st.spinner("📬 Creando Pull Request..."):
-                                                crear_pr_ticket.invoke({"ticket_id": t_id})
+                                                res_pr = crear_pr_ticket.invoke({"ticket_id": t_id})
+                                            if "Error" in res_pr:
+                                                db.add(TicketThread(id=str(uuid.uuid4()), ticket_id=t_id, author="SRE-Agent", content=f"**Error al crear PR:** {res_pr}"))
+                                                db.commit()
                                             st.rerun()
 
                 with c2:
