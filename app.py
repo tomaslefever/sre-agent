@@ -195,33 +195,27 @@ elif st.session_state.seccion == "Tablero de Tickets":
 
                                 # Botones de acción dentro del plan
                                 if t.status == "AWAITING_VALIDATION":
-                                    st.info("⏳ PR enviado — ticket en espera de validación. Los planes están bloqueados.")
+                                    st.info("⏳ PR enviado — ticket en espera de validación.")
                                 else:
                                     btn_c1, btn_c2 = st.columns(2)
                                     with btn_c1:
                                         if st.button(f"🚀 Ejecutar Plan V{v_num}", key=f"exec_plan_{v_num}", use_container_width=True, type="primary"):
                                             from agent_engine import ejecutar_plan_accion
                                             with st.spinner("🔧 Generando código en rama..."):
-                                                resultado = ejecutar_plan_accion.invoke({"ticket_id": t_id})
-                                            if "Error" in resultado:
-                                                st.error(resultado)
-                                            else:
-                                                st.success(resultado)
+                                                ejecutar_plan_accion.invoke({"ticket_id": t_id})
+                                            st.rerun()
                                     with btn_c2:
                                         if st.button(f"📬 Enviar PR V{v_num}", key=f"pr_plan_{v_num}", use_container_width=True):
                                             from agent_engine import crear_pr_ticket
                                             with st.spinner("📬 Creando Pull Request..."):
-                                                resultado_pr = crear_pr_ticket.invoke({"ticket_id": t_id})
-                                            if "Error" in resultado_pr:
-                                                st.error(resultado_pr)
-                                            else:
-                                                st.success(resultado_pr)
+                                                crear_pr_ticket.invoke({"ticket_id": t_id})
+                                            st.rerun()
 
-                    st.divider()
-                    st.markdown("#### 💬 Historial y Comentarios")
+                with c2:
+                    st.markdown("#### 💬 Historial")
                     hilos = db.query(TicketThread).filter(TicketThread.ticket_id == t_id).order_by(TicketThread.timestamp.asc()).all()
                     if not hilos:
-                        st.info("Sin comentarios aún.")
+                        st.info("Sin actividad aún.")
                     for h in hilos:
                         with st.chat_message("assistant" if h.author == "SRE-Agent" else "user"):
                             st.caption(f"{h.author} — {h.timestamp.strftime('%Y-%m-%d %H:%M')}")
@@ -232,77 +226,6 @@ elif st.session_state.seccion == "Tablero de Tickets":
                             if nuevo_txt:
                                 db.add(TicketThread(id=str(uuid.uuid4()), ticket_id=t_id, author="SRE-Admin", content=nuevo_txt))
                                 db.commit()
-                                st.rerun()
-
-                with c2:
-                    st.markdown("#### ⚙️ Gestión de Incidente")
-
-                    if t.status == "AWAITING_VALIDATION":
-                        st.warning("⏳ **En espera de validación**\nHay un PR abierto pendiente de revisión.")
-
-                    if t.status not in ("RESOLVED", "Resuelto"):
-                        if st.button("✅ Marcar como Resuelto", use_container_width=True):
-                            t.status = "RESOLVED"
-                            db.commit()
-                            st.rerun()
-
-                    # --- Sidebar Conversacional del Ticket ---
-                    st.divider()
-                    st.markdown("#### 🤖 Asistente del Ticket")
-
-                    # Inicializar session para chat del ticket
-                    ticket_chat_key = f"ticket_chat_{t_id}"
-                    if ticket_chat_key not in st.session_state:
-                        st.session_state[ticket_chat_key] = []
-
-                    # Mostrar historial del chat del ticket
-                    chat_container = st.container(height=300)
-                    with chat_container:
-                        for msg in st.session_state[ticket_chat_key]:
-                            with st.chat_message(msg["role"]):
-                                st.markdown(msg["content"])
-
-                    # Input del chat del ticket
-                    with st.form(key=f"ticket_agent_form_{t_id}", clear_on_submit=True):
-                        ticket_question = st.text_input("Pregunta sobre el incidente...", key=f"tq_{t_id}")
-                        if st.form_submit_button("Preguntar", use_container_width=True):
-                            if ticket_question:
-                                st.session_state[ticket_chat_key].append({"role": "user", "content": ticket_question})
-
-                                # Preparar contexto de adjuntos
-                                adjuntos_ctx = db.query(Attachment).filter(Attachment.ticket_id == t_id).all()
-                                att_texts = []
-                                for adj in adjuntos_ctx:
-                                    if adj.file_data and adj.file_type and adj.file_type.startswith("text/"):
-                                        try:
-                                            att_texts.append(f"[{adj.filename}]:\n{adj.file_data.decode('utf-8')}")
-                                        except:
-                                            att_texts.append(f"[{adj.filename}]: (binario)")
-                                    else:
-                                        att_texts.append(f"[{adj.filename}]: ({adj.file_type or 'adjunto'})")
-
-                                from agent_engine import get_ticket_agent
-                                from langchain_community.chat_message_histories import SQLChatMessageHistory
-                                from langchain_core.runnables.history import RunnableWithMessageHistory
-                                from database import DB_URL
-
-                                ticket_agent = get_ticket_agent(t_id, t.report or "", "\n".join(att_texts))
-                                ticket_session_id = f"ticket-agent-{t_id}"
-                                agent_with_hist = RunnableWithMessageHistory(
-                                    ticket_agent,
-                                    lambda sid: SQLChatMessageHistory(session_id=sid, connection_string=DB_URL),
-                                    input_messages_key="input",
-                                    history_messages_key="chat_history"
-                                )
-
-                                with st.spinner("Investigando..."):
-                                    res = agent_with_hist.invoke(
-                                        {"input": ticket_question},
-                                        config={"configurable": {"session_id": ticket_session_id}}
-                                    )
-                                    answer = res["output"]
-
-                                st.session_state[ticket_chat_key].append({"role": "assistant", "content": answer})
                                 st.rerun()
 
             else:
