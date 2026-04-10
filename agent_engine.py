@@ -30,37 +30,95 @@ def get_vector_store():
 
 @tool
 def buscar_conocimiento(query: str) -> str:
-    """Usa esto para buscar en la base de conocimiento."""
+    """Busca en la base de conocimiento vectorial. Devuelve fragmentos con archivo fuente y lineas."""
     v_store = get_vector_store()
-    docs = v_store.as_retriever(search_kwargs={"k": 5}).invoke(query)
+    docs = v_store.as_retriever(search_kwargs={"k": 8}).invoke(query)
     resultados = []
     for d in docs:
-        origen = d.metadata.get("source", "kb_general")
-        resultados.append(f"[{origen}]: {d.page_content}")
-    return "\n\n---\n\n".join(resultados) if resultados else "No se encontró nada."
+        src = d.metadata.get("source", "desconocido")
+        start = d.metadata.get("start_index", "?")
+        chunk_id = d.metadata.get("chunk_id", "?")
+        resultados.append(f"[ARCHIVO: {src} | chunk:{chunk_id} | offset:{start}]\n{d.page_content}")
+    return "\n\n---\n\n".join(resultados) if resultados else "No se encontro nada."
 
 @tool
 def listar_archivos_conocimiento(repo_filtro: str = None) -> str:
-    """Lista archivos disponibles."""
+    """Lista TODOS los archivos unicos indexados en Qdrant. Usa esto para saber que codigo tienes disponible antes de leer."""
     q_url = os.getenv("QDRANT_URL", "http://qdrant-db:6333")
     client = QdrantClient(url=q_url)
-    res = client.scroll(collection_name="kb_sre", limit=100, with_payload=True)[0]
-    archivos = {p.payload.get("source", "desconocido") for p in res}
-    return "Archivos:\n- " + "\n- ".join(sorted(list(archivos)))
+    all_points = []
+    offset = None
+    # Paginar para obtener todos los archivos
+    while True:
+        batch, next_offset = client.scroll(collection_name="kb_sre", limit=100, with_payload=True, offset=offset)
+        all_points.extend(batch)
+        if next_offset is None:
+            break
+        offset = next_offset
+    archivos = {}
+    for p in all_points:
+        src = p.payload.get("source", p.payload.get("metadata", {}).get("source", "desconocido"))
+        if repo_filtro and repo_filtro not in src:
+            continue
+        if src not in archivos:
+            archivos[src] = 0
+        archivos[src] += 1
+    lines = [f"- {name} ({count} chunks)" for name, count in sorted(archivos.items())]
+    return f"Total: {len(archivos)} archivos indexados\n" + "\n".join(lines)
 
 @tool
 def leer_archivo_conocimiento(nombre_archivo: str) -> str:
-    """Lee contenido de un archivo."""
+    """Lee TODOS los chunks de un archivo especifico. Devuelve el contenido completo reconstruido con marcadores de posicion."""
     from qdrant_client.models import Filter, FieldCondition, MatchValue
     q_url = os.getenv("QDRANT_URL", "http://qdrant-db:6333")
     client = QdrantClient(url=q_url)
-    res = client.scroll(
-        collection_name="kb_sre",
-        scroll_filter=Filter(must=[FieldCondition(key="metadata.source", match=MatchValue(value=nombre_archivo))]),
-        limit=20,
-        with_payload=True
-    )[0]
-    return "\n".join([p.payload.get("page_content", "") for p in res])
+    
+    # Intentar con metadata.source y con source directo
+    for filter_key in ["metadata.source", "source"]:
+        res = client.scroll(
+            collection_name="kb_sre",
+            scroll_filter=Filter(must=[FieldCondition(key=filter_key, match=MatchValue(value=nombre_archivo))]),
+            limit=50,
+            with_payload=True
+        )[0]
+        if res:
+            break
+    
+    if not res:
+        return f"Archivo '{nombre_archivo}' no encontrado. Usa 'listar_archivos_conocimiento' para ver archivos disponibles."
+    
+    # Reconstruir con marcadores de posicion
+    chunks = []
+    for i, p in enumerate(res):
+        content = p.payload.get("page_content", p.payload.get("content", ""))
+        offset = p.payload.get("start_index", p.payload.get("metadata", {}).get("start_index", "?"))
+        chunks.append(f"--- [Chunk {i+1}/{len(res)} | offset:{offset}] ---\n{content}")
+    
+    return f"ARCHIVO: {nombre_archivo} ({len(res)} fragmentos)\n\n" + "\n\n".join(chunks)
+
+@tool
+def buscar_codigo_detallado(query: str, limite: int = 20) -> str:
+    """Busqueda profunda en el codigo: Obtiene hasta 20 fragmentos relevantes con metadata completa (archivo, posicion). Usa esto cuando necesites mas contexto que buscar_conocimiento."""
+    v_store = get_vector_store()
+    k = min(limite, 30)
+    docs = v_store.as_retriever(search_kwargs={"k": k}).invoke(query)
+    
+    # Agrupar por archivo
+    por_archivo = {}
+    for d in docs:
+        src = d.metadata.get("source", d.metadata.get("metadata", {}).get("source", "desconocido"))
+        offset = d.metadata.get("start_index", "?")
+        if src not in por_archivo:
+            por_archivo[src] = []
+        por_archivo[src].append({"offset": offset, "content": d.page_content})
+    
+    informe = []
+    for archivo, fragments in por_archivo.items():
+        informe.append(f"\n### ARCHIVO: {archivo} ({len(fragments)} coincidencias)")
+        for f in fragments:
+            informe.append(f"  [offset:{f['offset']}]\n{f['content']}")
+    
+    return f"Busqueda profunda: {len(docs)} resultados en {len(por_archivo)} archivos\n" + "\n---\n".join(informe)
 
 @tool
 def crear_ticket_sre(reporte: str, autor: str, asignado: str = None) -> str:
@@ -138,13 +196,15 @@ def diagnostico_fast_track(ticket_id: str) -> str:
 INCIDENTE REPORTADO:
 {t.report}
 
-CONTEXTO DE LA BASE DE CONOCIMIENTO:
+CONTEXTO DE LA BASE DE CONOCIMIENTO (codigo y documentacion):
 {context_text}
 
-Responde UNICAMENTE con un JSON valido con estas dos claves:
+Responde UNICAMENTE con un JSON valido con estas claves:
 {{
-  "veredicto": "Explicacion tecnica detallada de la causa raiz del problema",
-  "plan": "Pasos numerados y concretos para resolver el incidente"
+  "veredicto": "Explicacion tecnica detallada de la causa raiz, referenciando archivos y secciones del codigo donde identificaste el problema",
+  "archivos_revisados": ["lista de archivos que analizaste del contexto"],
+  "hallazgos": ["lista de hallazgos especificos con referencia al archivo y fragmento de codigo donde encontraste cada problema"],
+  "plan": "Pasos numerados y concretos para resolver el incidente, indicando que archivos modificar y que cambios hacer"
 }}""")
     ]
     
@@ -155,6 +215,20 @@ Responde UNICAMENTE con un JSON valido con estas dos claves:
         
         veredicto = data.get("veredicto", "No se pudo determinar la causa raiz.")
         plan = data.get("plan", "No se pudo generar un plan.")
+        archivos_rev = data.get("archivos_revisados", [])
+        hallazgos = data.get("hallazgos", [])
+        
+        # Construir informe completo
+        informe = f"**Veredicto:** {veredicto}\n\n"
+        if archivos_rev:
+            informe += f"**Archivos revisados ({len(archivos_rev)}):**\n"
+            for a in archivos_rev:
+                informe += f"- `{a}`\n"
+        if hallazgos:
+            informe += f"\n**Hallazgos ({len(hallazgos)}):**\n"
+            for i, h in enumerate(hallazgos, 1):
+                informe += f"{i}. {h}\n"
+        informe += f"\n**Plan de Accion:** {plan}"
         
         # Guardar en DB
         t.veredicto = veredicto
@@ -163,6 +237,8 @@ Responde UNICAMENTE con un JSON valido con estas dos claves:
         planes.append({
             "version": nueva_v,
             "plan": plan,
+            "archivos_revisados": archivos_rev,
+            "hallazgos": hallazgos,
             "fecha": datetime.utcnow().isoformat()
         })
         t.planes_accion = planes
@@ -173,12 +249,12 @@ Responde UNICAMENTE con un JSON valido con estas dos claves:
             id=str(uuid.uuid4()),
             ticket_id=ticket_id,
             author="SRE-Agent",
-            content=f"**Fast-Track completado**\n\n**Veredicto:** {veredicto}\n\n**Plan V{nueva_v}:** {plan}"
+            content=f"**Fast-Track completado**\n\n{informe}"
         ))
         db.commit()
         db.close()
         
-        return f"VEREDICTO: {veredicto}\n\nPLAN DE ACCION (V{nueva_v}): {plan}"
+        return informe
     
     except json.JSONDecodeError as e:
         db.close()
@@ -200,21 +276,28 @@ def ejecutar_plan_accion(ticket_id: str) -> str:
     db.close()
     return "Plan Ejecutado"
 
-tools = [buscar_conocimiento, listar_archivos_conocimiento, leer_archivo_conocimiento, leer_ticket, crear_ticket_sre, actualizar_veredicto, generar_plan_accion, diagnostico_fast_track, ejecutar_plan_accion]
+tools = [buscar_conocimiento, listar_archivos_conocimiento, leer_archivo_conocimiento, buscar_codigo_detallado, leer_ticket, crear_ticket_sre, actualizar_veredicto, generar_plan_accion, diagnostico_fast_track, ejecutar_plan_accion]
 
 def get_agent_executor():
     llm = ChatOpenAI(model=os.getenv("OPENAI_MODEL", "gpt-4o"), temperature=0)
     prompt = ChatPromptTemplate.from_messages([
         ("system", """Eres AgentX, un Ingeniero SRE L1/L2 automatizado.
-Técnicos disponibles: Alex SRE, Sonia DevOps, Carlos Cloud, Marta Security.
+Tecnicos disponibles: Alex SRE, Sonia DevOps, Carlos Cloud, Marta Security.
 
 Tu flujo obligatorio:
-1. Extraer gravedad y sistema afectado.
-2. Usar 'buscar_conocimiento' para contextualizar con la base vectorial.
-3. Crear tickets con veredictos y planes de acción.
-4. Notificar al equipo y al usuario.
+1. Extraer gravedad y sistema afectado del reporte.
+2. SIEMPRE usar 'listar_archivos_conocimiento' para ver que codigo tienes.
+3. Usar 'buscar_conocimiento' o 'buscar_codigo_detallado' para encontrar codigo relevante.
+4. Usar 'leer_archivo_conocimiento' para leer archivos completos sospechosos.
+5. Crear tickets con veredictos detallados y planes de accion.
 
-Si te dan una descripción de imagen/captura, analízala como evidencia técnica.
+REGLAS DE INFORME:
+- SIEMPRE referencia los archivos que revisaste por nombre.
+- SIEMPRE indica las secciones/lineas/offsets donde encontraste problemas.
+- Si un primer busqueda no da suficiente contexto, usa 'buscar_codigo_detallado' con mas chunks.
+- Genera un informe estructurado: Archivos Revisados -> Hallazgos -> Veredicto -> Plan.
+
+Si te dan una descripcion de imagen/captura, analiza la evidencia visual.
 Si te dan un ID de ticket, usa 'leer_ticket' primero."""),
         ("placeholder", "{chat_history}"),
         ("human", "{input}"),

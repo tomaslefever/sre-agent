@@ -153,6 +153,17 @@ elif st.session_state.seccion == "Tablero de Tickets":
                         st.markdown("#### 🗺️ Planes de Acción")
                         for p in reversed(planes):
                             with st.expander(f"Plan V{p.get('version', '?')} — {p.get('fecha', '')[:10]}", expanded=(p == planes[-1])):
+                                archivos_rev = p.get("archivos_revisados", [])
+                                hallazgos = p.get("hallazgos", [])
+                                if archivos_rev:
+                                    st.markdown(f"**📁 Archivos revisados ({len(archivos_rev)}):**")
+                                    for a in archivos_rev:
+                                        st.code(a, language=None)
+                                if hallazgos:
+                                    st.markdown(f"**🔍 Hallazgos ({len(hallazgos)}):**")
+                                    for i, h in enumerate(hallazgos, 1):
+                                        st.markdown(f"{i}. {h}")
+                                st.markdown("**📋 Plan:**")
                                 st.write(p.get("plan", "Sin detalle"))
                     
                     st.divider()
