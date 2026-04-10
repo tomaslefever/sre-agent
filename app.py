@@ -447,71 +447,92 @@ if st.session_state.seccion == "Centro de Incidentes":
                 st.markdown(res["output"])
 
 elif st.session_state.seccion == "Tablero de Tickets":
-    st.header("Sistema de Gestión de Tickets")
+    st.header("📋 Tablero SRE Kanban")
     db = SessionLocal()
     
-    tickets_df = pd.read_sql(db.query(Ticket).statement, engine)
-    if not tickets_df.empty:
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Tickets Abiertos", len(tickets_df[tickets_df['status'] == 'Abierto']))
-        c2.metric("Tickets Totales", len(tickets_df))
-        c3.metric("Técnicos Activos", len(tickets_df['assigned_to'].unique()))
-        st.markdown("---")
-        
-    all_t = db.query(Ticket).all()
+    # CSS para el estilo Kanban
+    st.markdown("""
+        <style>
+        .kanban-col-header {
+            text-align: center;
+            font-size: 1rem;
+            font-weight: bold;
+            color: rgba(255, 255, 255, 0.7);
+            padding: 10px;
+            background: rgba(43, 44, 50, 0.5);
+            border-radius: 8px 8px 0 0;
+            margin-bottom: 5px;
+            border-bottom: 2px solid rgba(255,255,255,0.1);
+        }
+        </style>
+    """, unsafe_allow_html=True)
     
-    if all_t:
-        for t in all_t:
-            with st.expander(f"{t.id} - {t.report[:80]}..."):
-                cols = st.columns(3)
-                cols[0].metric("Autor", t.author)
-                cols[1].metric("Asignado a", t.assigned_to)
-                cols[2].metric("Estado", t.status)
-                
-                st.write("**Reporte de Incidente:**")
-                st.info(t.report)
-                
-                if t.veredicto:
-                    st.write("**⚖️ Análisis y Veredicto:**")
-                    st.success(t.veredicto)
-                
-                planes = t.planes_accion if t.planes_accion else []
-                if planes:
-                    st.write("**🎯 Plan de Ejecución Sugerido:**")
-                    state_key = f"plan_idx_{t.id}"
-                    if state_key not in st.session_state:
-                        st.session_state[state_key] = len(planes) - 1
-                        
-                    idx = st.session_state[state_key]
-                    plan_actual = planes[idx]
+    # Definir los 4 estados principales
+    estados = [
+        {"id": "Abierto", "label": "🟢 ABIERTOS", "db_st": "Abierto"},
+        {"id": "IN_PROGRESS", "label": "🟡 EN PROGRESO", "db_st": "IN_PROGRESS"},
+        {"id": "PENDING_NOTIF", "label": "🟠 REVISIÓN / NOTIF", "db_st": "PENDING_NOTIF"},
+        {"id": "RESOLVED", "label": "✅ RESUELTOS", "db_st": "RESOLVED"}
+    ]
+    
+    k_cols = st.columns(4)
+    all_tickets = db.query(Ticket).order_by(Ticket.id.desc()).all()
+    
+    for i, est in enumerate(estados):
+        with k_cols[i]:
+            st.markdown(f"<div class='kanban-col-header'>{est['label']}</div>", unsafe_allow_html=True)
+            
+            # Filtrar tickets para esta columna
+            tickets_col = [t for t in all_tickets if t.status == est['db_st']]
+            
+            if not tickets_col:
+                st.caption("Vacío")
+            
+            for t in tickets_col:
+                with st.container(border=True):
+                    # Cabecera de la tarjeta
+                    st.markdown(f"**{t.id}**")
+                    st.caption(f"👤 {t.author} | 👨‍💻 {t.assigned_to or '?'}")
                     
-                    c_left, c_mid, c_right = st.columns([1, 10, 1])
-                    with c_left:
-                        if st.button("⬅️", key=f"prev_{t.id}", disabled=(idx == 0)):
-                            st.session_state[state_key] -= 1
-                            st.rerun()
-                    with c_mid:
-                        st.markdown(f"**Versión {plan_actual['version']}** - *{plan_actual['fecha'][:16].replace('T', ' ')}*")
-                    with c_right:
-                        if st.button("➡️", key=f"next_{t.id}", disabled=(idx == len(planes) - 1)):
-                            st.session_state[state_key] += 1
-                            st.rerun()
-                            
-                    st.info(plan_actual['plan'])
-                
-                if st.button("🚀 Generar/Actualizar Plan de Acción (IA)", key=f"gen_{t.id}", use_container_width=True):
-                    st.session_state.run_agent_command = f"Revisa en detalle el ticket {t.id}, consulta toda la documentación y repositorios aplicables (mediante RAG 'buscar_conocimiento' si procede) y utiliza la herramienta 'generar_plan_accion' para proponer un nuevo plan de ejecución o mejorar el existente creando una nueva versión. También actualiza el diagnóstico del conflicto usando 'actualizar_veredicto'."
-                    st.session_state.seccion = "Centro de Incidentes"
-                    st.rerun()
-                
-                # Mostrar adjuntos si los hay
-                atts = db.query(Attachment).filter_by(ticket_id=t.id).all()
-                if atts:
-                    st.write("**Adjuntos guardados en el ticket:**")
-                    for a in atts:
-                        st.markdown(f"📎 `{a.filename}` ({a.file_type})")
-    else:
-        st.info("El tablero está vacío. Puedes pedir al agente que registre un incidente.")
+                    # Contenido colapsable para no saturar el Kanban
+                    with st.expander("Ver más..."):
+                        st.write(f"**Reporte:** {t.report[:100]}...")
+                        if t.veredicto:
+                            st.success(f"⚖️ **Veredicto:** {t.veredicto[:60]}...")
+                        
+                        planes = t.planes_accion if t.planes_accion else []
+                        if planes:
+                            state_key = f"k_plan_{t.id}"
+                            if state_key not in st.session_state:
+                                st.session_state[state_key] = len(planes) - 1
+                            curr_idx = st.session_state[state_key]
+                            st.caption(f"🎯 Plan V{planes[curr_idx]['version']}")
+                    
+                    # Botones de acción rápida
+                    if st.button("🚀 Analizar", key=f"k_gen_{t.id}", use_container_width=True):
+                        st.session_state.run_agent_command = f"Busca en el conocimiento y genera un veredicto y plan de acción para el ticket {t.id}."
+                        st.session_state.seccion = "Centro de Incidentes"
+                        st.rerun()
+                        
+                    # Cambio de estado rápido (simulación de arrastre)
+                    next_st_list = [e['db_st'] for e in estados]
+                    try:
+                        curr_at = next_st_list.index(t.status)
+                    except ValueError:
+                        curr_at = 0
+                        
+                    new_st = st.selectbox(
+                        "Mover a:", 
+                        next_st_list, 
+                        index=curr_at, 
+                        key=f"k_sel_{t.id}",
+                        label_visibility="collapsed"
+                    )
+                    if new_st != t.status:
+                        t.status = new_st
+                        db.commit()
+                        st.rerun()
+
     db.close()
 
 elif st.session_state.seccion == "Base de Conocimiento":
