@@ -63,7 +63,6 @@ if st.session_state.seccion == "Centro de Incidentes":
         key="incident_chat",
         placeholder="Describe el incidente o pega una captura (Ctrl+V)...",
         main_bottom=True,
-        max_image_size=10 * 1024 * 1024,
     )
     if response:
         text = response.text or ""
