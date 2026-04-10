@@ -195,9 +195,11 @@ def crear_ticket_sre(reporte: str, autor: str, asignado: str = None) -> str:
         import random
         asignado = random.choice(TECNICOS)
     t_id = f"TCK-{uuid.uuid4().hex[:6].upper()}"
+    # Vincular con la sesion de chat activa
+    current_session = st.session_state.get("session_id") if hasattr(st, "session_state") else None
     db = SessionLocal()
     try:
-        db.add(Ticket(id=t_id, report=reporte, author=autor, assigned_to=asignado))
+        db.add(Ticket(id=t_id, report=reporte, author=autor, assigned_to=asignado, session_id=current_session))
         db.commit()
         return f"Ticket {t_id} creado."
     except Exception as e:

@@ -3,7 +3,7 @@ import uuid
 import base64
 import streamlit as st
 from datetime import datetime
-from database import init_db, SessionLocal, Ticket, TicketThread, Attachment, Repository
+from database import init_db, SessionLocal, Ticket, TicketThread, Attachment, Repository, ChatSession
 from agent_engine import get_agent_executor, TECNICOS
 
 # --- INICIALIZACIÓN ---
@@ -35,9 +35,25 @@ with st.sidebar:
         st.session_state.seccion = "Base de Conocimiento"
         st.rerun()
     st.divider()
-    if st.button("🗑️ Limpiar Chat"):
+    if st.button("➕ Nueva Conversación", use_container_width=True):
         st.session_state.session_id = str(uuid.uuid4())
+        st.session_state.seccion = "Centro de Incidentes"
         st.rerun()
+
+    # Sesiones pasadas
+    st.caption("Conversaciones recientes")
+    _db = SessionLocal()
+    try:
+        sessions = _db.query(ChatSession).order_by(ChatSession.created_at.desc()).limit(15).all()
+        for s in sessions:
+            label = f"{s.title[:30]}..." if len(s.title) > 30 else s.title
+            is_active = st.session_state.session_id == s.id
+            if st.button(label, key=f"ses_{s.id}", use_container_width=True, type="primary" if is_active else "secondary"):
+                st.session_state.session_id = s.id
+                st.session_state.seccion = "Centro de Incidentes"
+                st.rerun()
+    finally:
+        _db.close()
 
 # --- SECCIÓN: CENTRO DE INCIDENTES ---
 if st.session_state.seccion == "Centro de Incidentes":
@@ -53,6 +69,20 @@ if st.session_state.seccion == "Centro de Incidentes":
         input_messages_key="input",
         history_messages_key="chat_history"
     )
+
+    # Mostrar tickets vinculados a esta sesión
+    _sdb = SessionLocal()
+    linked_tickets = _sdb.query(Ticket).filter(Ticket.session_id == st.session_state.session_id).all()
+    if linked_tickets:
+        for lt in linked_tickets:
+            tc1, tc2 = st.columns([3, 1])
+            tc1.info(f"🎫 **{lt.id}** — `{lt.status}` — {lt.assigned_to}")
+            if tc2.button("Ver Ticket", key=f"go_{lt.id}", use_container_width=True):
+                st.session_state.selected_ticket = lt.id
+                st.session_state.seccion = "Tablero de Tickets"
+                _sdb.close()
+                st.rerun()
+    _sdb.close()
 
     history = SQLChatMessageHistory(session_id=st.session_state.session_id, connection_string=DB_URL)
     for msg in history.messages:
@@ -111,6 +141,15 @@ if st.session_state.seccion == "Centro de Incidentes":
                 st.markdown(text)
             for name, img_bytes, mime in display_images:
                 st.image(img_bytes, caption=f"📷 {name}")
+
+        # Guardar/actualizar sesión
+        _sdb2 = SessionLocal()
+        existing_session = _sdb2.query(ChatSession).filter(ChatSession.id == st.session_state.session_id).first()
+        if not existing_session:
+            title = text[:50] if text else "Análisis de imagen"
+            _sdb2.add(ChatSession(id=st.session_state.session_id, title=title, created_at=datetime.utcnow()))
+            _sdb2.commit()
+        _sdb2.close()
 
         # Fase 3: Enviar al agente
         with st.chat_message("assistant"):

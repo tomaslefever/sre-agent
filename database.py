@@ -19,6 +19,7 @@ class Ticket(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     veredicto = Column(Text, nullable=True)
     planes_accion = Column(JSON, default=list)
+    session_id = Column(String, nullable=True)
 
 class TicketThread(Base):
     __tablename__ = "ticket_threads"
@@ -36,6 +37,12 @@ class Attachment(Base):
     file_type = Column(String)
     file_data = Column(LargeBinary, nullable=True)
 
+class ChatSession(Base):
+    __tablename__ = "chat_sessions"
+    id = Column(String, primary_key=True)
+    title = Column(String, default="Nueva conversación")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 class Repository(Base):
     __tablename__ = "repositories"
     id = Column(String, primary_key=True)
@@ -50,5 +57,7 @@ def init_db():
             conn.execute(text("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS planes_accion JSON DEFAULT '[]'::json;"))
             conn.execute(text("CREATE TABLE IF NOT EXISTS repositories (id TEXT PRIMARY KEY, url TEXT, last_updated TIMESTAMP);"))
             conn.execute(text("ALTER TABLE attachments ADD COLUMN IF NOT EXISTS file_data BYTEA;"))
+            conn.execute(text("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS session_id TEXT;"))
+            conn.execute(text("CREATE TABLE IF NOT EXISTS chat_sessions (id TEXT PRIMARY KEY, title TEXT DEFAULT 'Nueva conversación', created_at TIMESTAMP DEFAULT NOW());"))
     except Exception:
         pass
