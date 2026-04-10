@@ -18,10 +18,17 @@ if "seccion" not in st.session_state:
 if "selected_ticket" not in st.session_state:
     st.session_state.selected_ticket = None
 
-# Sidebar
 with st.sidebar:
     st.title("🤖 AgentX SRE")
-    st.session_state.seccion = st.radio("Navegación", ["Centro de Incidentes", "Tablero de Tickets", "Base de Conocimiento"])
+    if st.button("🕵️ Centro de Incidentes", use_container_width=True, type="primary" if st.session_state.seccion == "Centro de Incidentes" else "secondary"):
+        st.session_state.seccion = "Centro de Incidentes"
+        st.rerun()
+    if st.button("📋 Tablero de Tickets", use_container_width=True, type="primary" if st.session_state.seccion == "Tablero de Tickets" else "secondary"):
+        st.session_state.seccion = "Tablero de Tickets"
+        st.rerun()
+    if st.button("📚 Base de Conocimiento", use_container_width=True, type="primary" if st.session_state.seccion == "Base de Conocimiento" else "secondary"):
+        st.session_state.seccion = "Base de Conocimiento"
+        st.rerun()
     st.divider()
     if st.button("🗑️ Limpiar Chat"):
         st.session_state.session_id = str(uuid.uuid4())
