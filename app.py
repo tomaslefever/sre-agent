@@ -12,8 +12,10 @@ init_db()
 st.set_page_config(page_title="AgentX: SRE & Ticketing", page_icon="🎫", layout="wide")
 st.markdown("""<style>
     .block-container { padding-top: 1rem; }
-    [data-testid="stSidebar"] > div:first-child { padding-top: 1rem; }
     header[data-testid="stHeader"] { display: none; }
+    [data-testid="stSidebar"] > div:first-child { padding-top: 0 !important; }
+    [data-testid="stSidebar"] [data-testid="stSidebarContent"] { padding-top: 0.5rem !important; }
+    section[data-testid="stSidebar"] { top: 0 !important; }
     textarea { max-width: 100% !important; box-sizing: border-box !important; }
     .stTextArea > div > div > textarea { width: 100% !important; }
     iframe { max-width: 100% !important; }
