@@ -1,5 +1,6 @@
 import os
 import uuid
+import base64
 import streamlit as st
 from datetime import datetime
 from database import init_db, SessionLocal, Ticket, TicketThread, Repository
@@ -55,18 +56,71 @@ if st.session_state.seccion == "Centro de Incidentes":
         with st.chat_message(role):
             st.markdown(msg.content)
 
-    u_input = st.chat_input("Describe el incidente o pega un log...", accept_file=True)
+    u_input = st.chat_input(
+        "Describe el incidente o pega una captura (Ctrl+V)...",
+        accept_file="multiple",
+        file_type=["png", "jpg", "jpeg", "gif", "webp", "txt", "log", "csv", "json"]
+    )
     if u_input:
-        text = u_input.get("text", "")
+        text = u_input.text or ""
+        uploaded_files = u_input.files or []
+        
+        # Fase 1: Pre-procesar archivos
+        image_descriptions = []
+        file_texts = []
+        display_images = []
+        
+        for f in uploaded_files:
+            f_bytes = f.read()
+            if f.type and f.type.startswith("image/"):
+                # Convertir a base64 y analizar con GPT-4o Vision
+                img_b64 = base64.b64encode(f_bytes).decode()
+                display_images.append((f.name, f_bytes, f.type))
+                try:
+                    from agent_engine import analyze_image_with_vision
+                    desc = analyze_image_with_vision(img_b64, f.type, text)
+                    image_descriptions.append(f"[ANÁLISIS VISUAL de '{f.name}']:\n{desc}")
+                except Exception as e:
+                    image_descriptions.append(f"[ERROR al analizar imagen '{f.name}': {str(e)}]")
+            else:
+                # Archivos de texto/log
+                try:
+                    txt = f_bytes.decode("utf-8")
+                    file_texts.append(f"[CONTENIDO de '{f.name}']:\n{txt}")
+                except:
+                    file_texts.append(f"[ARCHIVO '{f.name}' adjunto (binario, no legible)]")
+        
+        # Fase 2: Construir el input completo para el agente (siempre texto)
+        parts = []
+        if text:
+            parts.append(text)
+        for desc in image_descriptions:
+            parts.append(desc)
+        for ft in file_texts:
+            parts.append(ft)
+        if not parts:
+            parts.append("El usuario ha adjuntado archivos sin mensaje adicional.")
+        
+        full_input = "\n\n".join(parts)
+        
+        # Mostrar en UI
         with st.chat_message("user"):
-            st.markdown(text)
+            if text:
+                st.markdown(text)
+            for name, img_bytes, mime in display_images:
+                st.image(img_bytes, caption=f"📷 {name}")
+            for ft in file_texts:
+                st.caption(f"📎 Archivo adjunto")
+        
+        # Fase 3: Enviar al agente (siempre string, con la descripción de visión incluida)
         with st.chat_message("assistant"):
-            with st.spinner("AgentX analizando..."):
+            with st.spinner("AgentX analizando evidencia..."):
                 res = agent_with_memory.invoke(
-                    {"input": text}, 
+                    {"input": full_input},
                     config={"configurable": {"session_id": st.session_state.session_id}}
                 )
                 st.markdown(res["output"])
+
 
 # --- SECCIÓN: TABLERO KANBAN ---
 elif st.session_state.seccion == "Tablero de Tickets":

@@ -155,9 +155,39 @@ tools = [buscar_conocimiento, listar_archivos_conocimiento, leer_archivo_conocim
 def get_agent_executor():
     llm = ChatOpenAI(model="gpt-4o", temperature=0)
     prompt = ChatPromptTemplate.from_messages([
-        ("system", "Eres AgentX."),
+        ("system", """Eres AgentX, un Ingeniero SRE L1/L2 automatizado.
+Técnicos disponibles: Alex SRE, Sonia DevOps, Carlos Cloud, Marta Security.
+
+Tu flujo obligatorio:
+1. Extraer gravedad y sistema afectado.
+2. Usar 'buscar_conocimiento' para contextualizar con la base vectorial.
+3. Crear tickets con veredictos y planes de acción.
+4. Notificar al equipo y al usuario.
+
+Si te dan una descripción de imagen/captura, analízala como evidencia técnica.
+Si te dan un ID de ticket, usa 'leer_ticket' primero."""),
         ("placeholder", "{chat_history}"),
         ("human", "{input}"),
         ("placeholder", "{agent_scratchpad}"),
     ])
     return AgentExecutor(agent=create_tool_calling_agent(llm, tools, prompt), tools=tools, verbose=True)
+
+
+def analyze_image_with_vision(image_b64: str, mime_type: str, user_text: str = "") -> str:
+    """Usa GPT-4o Vision directamente para analizar una imagen y devuelve una descripción técnica en texto."""
+    from langchain_core.messages import HumanMessage
+    
+    vision_llm = ChatOpenAI(model="gpt-4o", temperature=0, max_tokens=1500)
+    
+    content_blocks = []
+    if user_text:
+        content_blocks.append({"type": "text", "text": user_text})
+    content_blocks.append({"type": "text", "text": "Analiza esta captura/imagen como un Ingeniero SRE. Describe exactamente qué ves: errores, logs, métricas, dashboards, stack traces, códigos de estado HTTP, etc. Sé extremadamente técnico y preciso."})
+    content_blocks.append({
+        "type": "image_url",
+        "image_url": {"url": f"data:{mime_type};base64,{image_b64}"}
+    })
+    
+    msg = HumanMessage(content=content_blocks)
+    response = vision_llm.invoke([msg])
+    return response.content
