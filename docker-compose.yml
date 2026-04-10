@@ -1,17 +1,17 @@
 services:
-  # Base de Datos Vectorial
+  # Vector Database
   qdrant-db:
     image: qdrant/qdrant:latest
     volumes:
       - qdrant_data:/qdrant/storage
 
-  # Observabilidad
+  # Observability
   phoenix:
     image: arizephoenix/phoenix:latest
     ports:
       - "6006:6006"
 
-  # Base de Datos Relacional para Historial de Chat
+  # Relational Database for Chat History
   postgres:
     image: postgres:15-alpine
     environment:
@@ -26,7 +26,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # Nuestra Aplicación Streamlit
+  # Streamlit Application
   app:
     build:
       context: .
@@ -45,7 +45,7 @@ services:
       - postgres
       - phoenix
 
-  # Endpoynt de Webhooks de GitHub
+  # GitHub Webhooks Endpoint
   webhook:
     build:
       context: .

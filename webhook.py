@@ -15,7 +15,7 @@ def run_sync_and_update_db(repo_url: str):
     if result["status"] == "ok":
         try:
             db = SessionLocal()
-            # Actualizamos la fecha
+            # Update the last_updated date
             from datetime import datetime
             query = text("UPDATE repositories SET last_updated = :now WHERE url = :url")
             db.execute(query, {"now": datetime.utcnow(), "url": repo_url})

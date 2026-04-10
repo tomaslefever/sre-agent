@@ -67,7 +67,7 @@ def sync_github_repo(repo_url: str):
                     
     if docs:
         vector_store = get_qdrant()
-        # 1. Eliminar versiones antiguas del repo en base vectorial para evitar duplicidad de búsquedas
+        # 1. Delete old versions of the repo in the vector database to avoid search duplicates
         from qdrant_client.models import Filter, FieldCondition, MatchValue
         try:
             vector_store.client.delete(
@@ -82,9 +82,9 @@ def sync_github_repo(repo_url: str):
                 )
             )
         except Exception:
-            pass # Si falla o es la primera vez, ignorar
+            pass # If it fails or it's the first time, ignore
             
-        # 2. Agregar los nuevos documentos actualizados al espacio liberado
+        # 2. Add the new updated documents to the freed space
         vector_store.add_documents(docs)
         
     return {"status": "ok", "docs_indexed": len(docs)}

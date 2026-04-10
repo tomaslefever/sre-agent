@@ -2,8 +2,8 @@ import streamlit.components.v1 as components
 import base64
 
 def paste_handler():
-    # Este componente inyecta Javascript que escucha el evento 'paste' globalmente
-    # Si detecta una imagen, la envía de vuelta como una cadena Base64
+    # This component injects Javascript that listens for the global 'paste' event
+    # If it detects an image, it sends it back as a Base64 string
     js_code = """
     <script>
     document.addEventListener('paste', function (e) {
