@@ -35,6 +35,8 @@ services:
       - "8501:8501"
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
       - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:6006/v1/traces
       - DATABASE_URL=postgresql://agentx:supersecret@postgres:5432/chat_history
       - QDRANT_URL=http://qdrant-db:6333
