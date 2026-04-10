@@ -388,7 +388,18 @@ def ejecutar_plan_accion(ticket_id: str) -> str:
         "Accept": "application/vnd.github.v3+json"
     }
     api_base = f"https://api.github.com/repos/{owner}/{repo_name}"
-    branch_name = f"fix/{ticket_id.lower()}"
+
+    # Generar nombre de rama descriptivo con referencia al ticket
+    import re
+    veredicto_slug = ""
+    if t.veredicto:
+        # Tomar las primeras palabras del veredicto como descripcion
+        slug = re.sub(r'[^a-z0-9\s]', '', t.veredicto[:60].lower())
+        veredicto_slug = "-".join(slug.split()[:5])
+    elif plan_text:
+        slug = re.sub(r'[^a-z0-9\s]', '', plan_text[:60].lower())
+        veredicto_slug = "-".join(slug.split()[:5])
+    branch_name = f"fix/{ticket_id.lower()}/{veredicto_slug}" if veredicto_slug else f"fix/{ticket_id.lower()}"
 
     try:
         # 1. Obtener SHA de main
@@ -465,8 +476,9 @@ Devuelve el codigo corregido completo del archivo. Solo el codigo, sin backticks
             file_path = archivo.lstrip("/")
             file_res = requests.get(f"{api_base}/contents/{file_path}?ref={branch_name}", headers=headers)
 
+            veredicto_corto = (t.veredicto[:80] + "...") if t.veredicto and len(t.veredicto) > 80 else (t.veredicto or "correccion automatica")
             commit_data = {
-                "message": f"fix({ticket_id}): corregir {file_path}",
+                "message": f"fix({ticket_id}): {file_path}\n\n{veredicto_corto}\n\nRef: {ticket_id}",
                 "content": __import__("base64").b64encode(codigo_corregido.encode()).decode(),
                 "branch": branch_name
             }
@@ -531,13 +543,14 @@ def crear_pr_ticket(ticket_id: str) -> str:
         "Accept": "application/vnd.github.v3+json"
     }
     api_base = f"https://api.github.com/repos/{owner}/{repo_name}"
-    branch_name = f"fix/{ticket_id.lower()}"
+    branch_prefix = f"fix/{ticket_id.lower()}"
 
-    # Verificar que la rama existe
-    ref_res = requests.get(f"{api_base}/git/ref/heads/{branch_name}", headers=headers)
-    if ref_res.status_code != 200:
+    # Buscar rama del ticket (puede tener slug descriptivo)
+    refs_res = requests.get(f"{api_base}/git/matching-refs/heads/{branch_prefix}", headers=headers)
+    if refs_res.status_code != 200 or not refs_res.json():
         db.close()
-        return f"La rama {branch_name} no existe. Ejecuta el plan primero."
+        return f"No se encontro rama para {ticket_id}. Ejecuta el plan primero."
+    branch_name = refs_res.json()[-1]["ref"].replace("refs/heads/", "")
 
     # Detectar rama base
     base_check = requests.get(f"{api_base}/git/ref/heads/main", headers=headers)
