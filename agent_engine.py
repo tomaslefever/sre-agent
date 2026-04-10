@@ -12,8 +12,6 @@ from langchain_core.prompts import ChatPromptTemplate
 from database import SessionLocal, Ticket, TicketThread, Attachment
 
 TECHNICIANS = ["Alex SRE", "Sonia DevOps", "Carlos Cloud", "Marta Security"]
-# Keep backward-compatible alias
-TECNICOS = TECHNICIANS
 
 @st.cache_resource
 def get_vector_store():
@@ -31,7 +29,7 @@ def get_vector_store():
     return QdrantVectorStore(client=client, collection_name="kb_sre", embedding=embeddings)
 
 
-def diagnosticar_qdrant() -> dict:
+def diagnose_qdrant() -> dict:
     """Inspects Qdrant and returns a report on the vector database state."""
     q_url = os.getenv("QDRANT_URL", "http://qdrant-db:6333")
     client = QdrantClient(url=q_url)
@@ -39,7 +37,7 @@ def diagnosticar_qdrant() -> dict:
     result = {
         "collection_exists": False,
         "total_points": 0,
-        "archivos": {},
+        "files": {},
         "metadata_keys": set(),
         "sample_payloads": []
     }
@@ -74,7 +72,7 @@ def diagnosticar_qdrant() -> dict:
                 or payload.get("metadata", {}).get("source")
                 or "NO_SOURCE"
             )
-            result["archivos"][src] = result["archivos"].get(src, 0) + 1
+            result["files"][src] = result["files"].get(src, 0) + 1
 
         for p in all_points[:3]:
             sample = {}
@@ -95,7 +93,7 @@ def diagnosticar_qdrant() -> dict:
 
 
 @tool
-def buscar_conocimiento(query: str) -> str:
+def search_knowledge(query: str) -> str:
     """Searches the vector knowledge base. Returns fragments with source file and lines."""
     v_store = get_vector_store()
     docs = v_store.as_retriever(search_kwargs={"k": 8}).invoke(query)
@@ -108,7 +106,7 @@ def buscar_conocimiento(query: str) -> str:
     return "\n\n---\n\n".join(results) if results else "Nothing found."
 
 @tool
-def listar_archivos_conocimiento(repo_filtro: str = None) -> str:
+def list_knowledge_files(repo_filter: str = None) -> str:
     """Lists ALL unique files indexed in Qdrant. Use this to see what code you have available before reading."""
     q_url = os.getenv("QDRANT_URL", "http://qdrant-db:6333")
     client = QdrantClient(url=q_url)
@@ -123,7 +121,7 @@ def listar_archivos_conocimiento(repo_filtro: str = None) -> str:
     files = {}
     for p in all_points:
         src = p.payload.get("source", p.payload.get("metadata", {}).get("source", "unknown"))
-        if repo_filtro and repo_filtro not in src:
+        if repo_filter and repo_filter not in src:
             continue
         if src not in files:
             files[src] = 0
@@ -132,7 +130,7 @@ def listar_archivos_conocimiento(repo_filtro: str = None) -> str:
     return f"Total: {len(files)} indexed files\n" + "\n".join(lines)
 
 @tool
-def leer_archivo_conocimiento(nombre_archivo: str) -> str:
+def read_knowledge_file(file_name: str) -> str:
     """Reads ALL chunks of a specific file. Returns the full reconstructed content with position markers."""
     from qdrant_client.models import Filter, FieldCondition, MatchValue
     q_url = os.getenv("QDRANT_URL", "http://qdrant-db:6333")
@@ -141,7 +139,7 @@ def leer_archivo_conocimiento(nombre_archivo: str) -> str:
     for filter_key in ["metadata.source", "source"]:
         res = client.scroll(
             collection_name="kb_sre",
-            scroll_filter=Filter(must=[FieldCondition(key=filter_key, match=MatchValue(value=nombre_archivo))]),
+            scroll_filter=Filter(must=[FieldCondition(key=filter_key, match=MatchValue(value=file_name))]),
             limit=50,
             with_payload=True
         )[0]
@@ -149,7 +147,7 @@ def leer_archivo_conocimiento(nombre_archivo: str) -> str:
             break
 
     if not res:
-        return f"File '{nombre_archivo}' not found. Use 'listar_archivos_conocimiento' to see available files."
+        return f"File '{file_name}' not found. Use 'list_knowledge_files' to see available files."
 
     chunks = []
     for i, p in enumerate(res):
@@ -157,13 +155,13 @@ def leer_archivo_conocimiento(nombre_archivo: str) -> str:
         offset = p.payload.get("start_index", p.payload.get("metadata", {}).get("start_index", "?"))
         chunks.append(f"--- [Chunk {i+1}/{len(res)} | offset:{offset}] ---\n{content}")
 
-    return f"FILE: {nombre_archivo} ({len(res)} fragments)\n\n" + "\n\n".join(chunks)
+    return f"FILE: {file_name} ({len(res)} fragments)\n\n" + "\n\n".join(chunks)
 
 @tool
-def buscar_codigo_detallado(query: str, limite: int = 20) -> str:
-    """Deep code search: Gets up to 20 relevant fragments with full metadata (file, position). Use when you need more context than buscar_conocimiento."""
+def detailed_code_search(query: str, limit: int = 20) -> str:
+    """Deep code search: Gets up to 20 relevant fragments with full metadata (file, position). Use when you need more context than search_knowledge."""
     v_store = get_vector_store()
-    k = min(limite, 30)
+    k = min(limit, 30)
     docs = v_store.as_retriever(search_kwargs={"k": k}).invoke(query)
 
     by_file = {}
@@ -175,24 +173,24 @@ def buscar_codigo_detallado(query: str, limite: int = 20) -> str:
         by_file[src].append({"offset": offset, "content": d.page_content})
 
     report = []
-    for file, fragments in by_file.items():
-        report.append(f"\n### FILE: {file} ({len(fragments)} matches)")
+    for file_path, fragments in by_file.items():
+        report.append(f"\n### FILE: {file_path} ({len(fragments)} matches)")
         for f in fragments:
             report.append(f"  [offset:{f['offset']}]\n{f['content']}")
 
     return f"Deep search: {len(docs)} results in {len(by_file)} files\n" + "\n---\n".join(report)
 
 @tool
-def crear_ticket_sre(reporte: str, autor: str, asignado: str = None) -> str:
+def create_sre_ticket(report: str, author: str, assigned_to: str = None) -> str:
     """Creates a ticket."""
-    if not asignado:
+    if not assigned_to:
         import random
-        asignado = random.choice(TECHNICIANS)
+        assigned_to = random.choice(TECHNICIANS)
     t_id = f"TCK-{uuid.uuid4().hex[:6].upper()}"
     current_session = st.session_state.get("session_id") if hasattr(st, "session_state") else None
     db = SessionLocal()
     try:
-        db.add(Ticket(id=t_id, report=reporte, author=autor, assigned_to=asignado, session_id=current_session))
+        db.add(Ticket(id=t_id, report=report, author=author, assigned_to=assigned_to, session_id=current_session))
         db.commit()
         return f"Ticket {t_id} created."
     except Exception as e:
@@ -202,7 +200,7 @@ def crear_ticket_sre(reporte: str, autor: str, asignado: str = None) -> str:
         db.close()
 
 @tool
-def leer_ticket(ticket_id: str) -> str:
+def read_ticket(ticket_id: str) -> str:
     """Reads ticket info."""
     db = SessionLocal()
     t = db.query(Ticket).filter(Ticket.id == ticket_id).first()
@@ -210,31 +208,31 @@ def leer_ticket(ticket_id: str) -> str:
     return f"ID: {t.id}, Status: {t.status}" if t else "Not found."
 
 @tool
-def actualizar_veredicto(ticket_id: str, veredicto_txt: str) -> str:
+def update_verdict(ticket_id: str, verdict_text: str) -> str:
     """Updates verdict."""
     db = SessionLocal()
     t = db.query(Ticket).filter(Ticket.id == ticket_id).first()
     if t:
-        t.veredicto = veredicto_txt
+        t.verdict = verdict_text
         db.commit()
     db.close()
     return "OK"
 
 @tool
-def generar_plan_accion(ticket_id: str, nuevo_plan: str) -> str:
+def generate_action_plan(ticket_id: str, new_plan: str) -> str:
     """Generates action plan."""
     db = SessionLocal()
     t = db.query(Ticket).filter(Ticket.id == ticket_id).first()
     if t:
-        planes = list(t.planes_accion) if t.planes_accion else []
-        planes.append({"version": len(planes)+1, "plan": nuevo_plan, "fecha": datetime.utcnow().isoformat()})
-        t.planes_accion = planes
+        plans = list(t.action_plans) if t.action_plans else []
+        plans.append({"version": len(plans)+1, "plan": new_plan, "date": datetime.utcnow().isoformat()})
+        t.action_plans = plans
         db.commit()
     db.close()
     return "OK"
 
 @tool
-def diagnostico_fast_track(ticket_id: str) -> str:
+def fast_track_diagnosis(ticket_id: str) -> str:
     """Fast track: Searches 10 chunks in Qdrant, generates diagnosis + plan in a single pass with GPT-4o."""
     import json
     from langchain_core.messages import SystemMessage, HumanMessage
@@ -284,43 +282,43 @@ Respond ONLY with valid JSON with these keys:
 
         verdict = data.get("verdict", "Could not determine root cause.")
         plan = data.get("plan", "Could not generate a plan.")
-        files_rev = data.get("files_reviewed", [])
+        files_reviewed = data.get("files_reviewed", [])
         findings = data.get("findings", [])
 
-        report = f"**Verdict:** {verdict}\n\n"
-        if files_rev:
-            report += f"**Files reviewed ({len(files_rev)}):**\n"
-            for a in files_rev:
-                report += f"- `{a}`\n"
+        report_text = f"**Verdict:** {verdict}\n\n"
+        if files_reviewed:
+            report_text += f"**Files reviewed ({len(files_reviewed)}):**\n"
+            for a in files_reviewed:
+                report_text += f"- `{a}`\n"
         if findings:
-            report += f"\n**Findings ({len(findings)}):**\n"
+            report_text += f"\n**Findings ({len(findings)}):**\n"
             for i, h in enumerate(findings, 1):
-                report += f"{i}. {h}\n"
-        report += f"\n**Action Plan:** {plan}"
+                report_text += f"{i}. {h}\n"
+        report_text += f"\n**Action Plan:** {plan}"
 
-        t.veredicto = verdict
-        planes = list(t.planes_accion) if t.planes_accion else []
-        new_v = len(planes) + 1
-        planes.append({
+        t.verdict = verdict
+        plans = list(t.action_plans) if t.action_plans else []
+        new_v = len(plans) + 1
+        plans.append({
             "version": new_v,
             "plan": plan,
-            "archivos_revisados": files_rev,
-            "hallazgos": findings,
-            "fecha": datetime.utcnow().isoformat()
+            "files_reviewed": files_reviewed,
+            "findings": findings,
+            "date": datetime.utcnow().isoformat()
         })
-        t.planes_accion = planes
+        t.action_plans = plans
         t.status = "IN_PROGRESS"
 
         db.add(TicketThread(
             id=str(uuid.uuid4()),
             ticket_id=ticket_id,
             author="SRE-Agent",
-            content=f"**Fast-Track completed**\n\n{report}"
+            content=f"**Fast-Track completed**\n\n{report_text}"
         ))
         db.commit()
         db.close()
 
-        return report
+        return report_text
 
     except json.JSONDecodeError as e:
         db.close()
@@ -331,7 +329,7 @@ Respond ONLY with valid JSON with these keys:
 
 
 @tool
-def ejecutar_plan_accion(ticket_id: str) -> str:
+def execute_action_plan(ticket_id: str) -> str:
     """Executes the ticket's action plan: generates corrected code with AI and pushes it to a branch on GitHub. Does NOT create a PR."""
     import json
     import requests
@@ -347,15 +345,15 @@ def ejecutar_plan_accion(ticket_id: str) -> str:
         db.close()
         return "Ticket not found."
 
-    planes = list(t.planes_accion) if t.planes_accion else []
-    if not planes:
+    plans = list(t.action_plans) if t.action_plans else []
+    if not plans:
         db.close()
         return "No action plan. Generate an Action Plan first."
 
-    last_plan = planes[-1]
-    plan_text = last_plan.get("plan", "")
-    files_rev = last_plan.get("archivos_revisados", [])
-    findings = last_plan.get("hallazgos", [])
+    latest_plan = plans[-1]
+    plan_text = latest_plan.get("plan", "")
+    files_reviewed = latest_plan.get("files_reviewed", [])
+    findings = latest_plan.get("findings", [])
 
     from database import Repository
     repo = db.query(Repository).first()
@@ -378,8 +376,8 @@ def ejecutar_plan_accion(ticket_id: str) -> str:
 
     import re
     verdict_slug = ""
-    if t.veredicto:
-        slug = re.sub(r'[^a-z0-9\s]', '', t.veredicto[:60].lower())
+    if t.verdict:
+        slug = re.sub(r'[^a-z0-9\s]', '', t.verdict[:60].lower())
         verdict_slug = "-".join(slug.split()[:5])
     elif plan_text:
         slug = re.sub(r'[^a-z0-9\s]', '', plan_text[:60].lower())
@@ -409,7 +407,7 @@ def ejecutar_plan_accion(ticket_id: str) -> str:
 
         modified_files = []
 
-        for file in files_rev:
+        for file_path in files_reviewed:
             from qdrant_client.models import Filter, FieldCondition, MatchValue
             q_url = os.getenv("QDRANT_URL", "http://qdrant-db:6333")
             client = QdrantClient(url=q_url)
@@ -418,7 +416,7 @@ def ejecutar_plan_accion(ticket_id: str) -> str:
             for filter_key in ["metadata.source", "source"]:
                 res_q = client.scroll(
                     collection_name="kb_sre",
-                    scroll_filter=Filter(must=[FieldCondition(key=filter_key, match=MatchValue(value=file))]),
+                    scroll_filter=Filter(must=[FieldCondition(key=filter_key, match=MatchValue(value=file_path))]),
                     limit=50, with_payload=True
                 )[0]
                 if res_q:
@@ -432,7 +430,7 @@ def ejecutar_plan_accion(ticket_id: str) -> str:
 
             fix_messages = [
                 SystemMessage(content="You are a senior software engineer. Your task is to apply fixes to source code. Return ONLY the complete corrected code, no markdown, no explanations."),
-                HumanMessage(content=f"""FILE: {file}
+                HumanMessage(content=f"""FILE: {file_path}
 
 ORIGINAL CODE:
 {original_code}
@@ -455,21 +453,21 @@ Return the complete corrected code for the file. Only the code, no backticks or 
                 lines = corrected_code.split("\n")
                 corrected_code = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
 
-            file_path = file.lstrip("/")
-            file_res = requests.get(f"{api_base}/contents/{file_path}?ref={branch_name}", headers=headers)
+            clean_path = file_path.lstrip("/")
+            file_res = requests.get(f"{api_base}/contents/{clean_path}?ref={branch_name}", headers=headers)
 
-            verdict_short = (t.veredicto[:80] + "...") if t.veredicto and len(t.veredicto) > 80 else (t.veredicto or "automatic fix")
+            verdict_short = (t.verdict[:80] + "...") if t.verdict and len(t.verdict) > 80 else (t.verdict or "automatic fix")
             commit_data = {
-                "message": f"fix({ticket_id}): {file_path}\n\n{verdict_short}\n\nRef: {ticket_id}",
+                "message": f"fix({ticket_id}): {clean_path}\n\n{verdict_short}\n\nRef: {ticket_id}",
                 "content": __import__("base64").b64encode(corrected_code.encode()).decode(),
                 "branch": branch_name
             }
             if file_res.status_code == 200:
                 commit_data["sha"] = file_res.json()["sha"]
 
-            put_res = requests.put(f"{api_base}/contents/{file_path}", headers=headers, json=commit_data)
+            put_res = requests.put(f"{api_base}/contents/{clean_path}", headers=headers, json=commit_data)
             if put_res.status_code in (200, 201):
-                modified_files.append(file_path)
+                modified_files.append(clean_path)
 
         t.status = "PENDING_NOTIF"
         db.add(TicketThread(
@@ -492,8 +490,8 @@ Return the complete corrected code for the file. Only the code, no backticks or 
 
 
 @tool
-def crear_pr_ticket(ticket_id: str) -> str:
-    """Creates a Pull Request on GitHub for the ticket's fix branch. Must be run after ejecutar_plan_accion."""
+def create_pr_ticket(ticket_id: str) -> str:
+    """Creates a Pull Request on GitHub for the ticket's fix branch. Must be run after execute_action_plan."""
     import requests
 
     gh_token = os.getenv("GITHUB_TOKEN")
@@ -535,8 +533,8 @@ def crear_pr_ticket(ticket_id: str) -> str:
     base_check = requests.get(f"{api_base}/git/ref/heads/main", headers=headers)
     base_branch = "main" if base_check.status_code == 200 else "master"
 
-    planes = list(t.planes_accion) if t.planes_accion else []
-    plan_text = planes[-1].get("plan", "N/A") if planes else "N/A"
+    plans = list(t.action_plans) if t.action_plans else []
+    plan_text = plans[-1].get("plan", "N/A") if plans else "N/A"
 
     threads = db.query(TicketThread).filter(TicketThread.ticket_id == ticket_id).all()
     files_info = ""
@@ -551,7 +549,7 @@ def crear_pr_ticket(ticket_id: str) -> str:
 {t.report[:500]}
 
 ### Verdict
-{t.veredicto or 'N/A'}
+{t.verdict or 'N/A'}
 
 ### Modified files
 {files_info or 'See commits on the branch'}
@@ -576,7 +574,7 @@ def crear_pr_ticket(ticket_id: str) -> str:
             return f"PR already exists: {pr_url}"
 
         import re
-        title_desc = re.sub(r'[\r\n]+', ' ', t.veredicto[:70]) if t.veredicto else "Automatic fix"
+        title_desc = re.sub(r'[\r\n]+', ' ', t.verdict[:70]) if t.verdict else "Automatic fix"
         pr_title = f"fix({ticket_id}): {title_desc}"
 
         pr_res = requests.post(f"{api_base}/pulls", headers=headers, json={
@@ -619,7 +617,7 @@ def crear_pr_ticket(ticket_id: str) -> str:
         db.close()
         return f"Error: {str(e)}"
 
-tools = [buscar_conocimiento, listar_archivos_conocimiento, leer_archivo_conocimiento, buscar_codigo_detallado, leer_ticket, crear_ticket_sre, actualizar_veredicto, generar_plan_accion, diagnostico_fast_track, ejecutar_plan_accion, crear_pr_ticket]
+tools = [search_knowledge, list_knowledge_files, read_knowledge_file, detailed_code_search, read_ticket, create_sre_ticket, update_verdict, generate_action_plan, fast_track_diagnosis, execute_action_plan, create_pr_ticket]
 
 def get_agent_executor():
     llm = ChatOpenAI(model=os.getenv("OPENAI_MODEL", "gpt-4o"), temperature=0)
@@ -629,15 +627,15 @@ Available technicians: Alex SRE, Sonia DevOps, Carlos Cloud, Marta Security.
 
 Your mandatory workflow:
 1. Extract severity and affected system from the report.
-2. ALWAYS use 'listar_archivos_conocimiento' to see what code you have available.
-3. Use 'buscar_conocimiento' for a quick initial search.
-4. ALWAYS go deeper with 'buscar_codigo_detallado' (limit=20 or more) for full context.
-5. Use 'leer_archivo_conocimiento' to read complete suspicious files. Read ALL relevant files regardless of how many there are.
+2. ALWAYS use 'list_knowledge_files' to see what code you have available.
+3. Use 'search_knowledge' for a quick initial search.
+4. ALWAYS go deeper with 'detailed_code_search' (limit=20 or more) for full context.
+5. Use 'read_knowledge_file' to read complete suspicious files. Read ALL relevant files regardless of how many there are.
 6. Create tickets with detailed verdicts and action plans.
 
 SEARCH RULES (CRITICAL):
 - NEVER settle for a single search. Run multiple searches with different terms.
-- If you find relevant files, READ THEM COMPLETELY with 'leer_archivo_conocimiento'.
+- If you find relevant files, READ THEM COMPLETELY with 'read_knowledge_file'.
 - Search exhaustively regardless of how long it takes. Precision is more important than speed.
 - If a result mentions other files, search and read those files too.
 
@@ -652,7 +650,7 @@ DATA ISOLATION:
 - Attachments (images, logs) are provided as part of the user's message.
 
 If given an image/screenshot description, analyze the visual evidence.
-If given a ticket ID, use 'leer_ticket' first."""),
+If given a ticket ID, use 'read_ticket' first."""),
         ("placeholder", "{chat_history}"),
         ("human", "{input}"),
         ("placeholder", "{agent_scratchpad}"),
@@ -662,7 +660,7 @@ If given a ticket ID, use 'leer_ticket' first."""),
 
 def get_ticket_agent(ticket_id: str, ticket_report: str, attachments_text: str = ""):
     """Creates a conversational agent contextualized for a specific ticket."""
-    ticket_tools = [buscar_conocimiento, listar_archivos_conocimiento, leer_archivo_conocimiento, buscar_codigo_detallado, leer_ticket]
+    ticket_tools = [search_knowledge, list_knowledge_files, read_knowledge_file, detailed_code_search, read_ticket]
     llm = ChatOpenAI(model=os.getenv("OPENAI_MODEL", "gpt-4o"), temperature=0)
     prompt = ChatPromptTemplate.from_messages([
         ("system", f"""You are AgentX, an expert SRE assistant assigned to ticket {ticket_id}.

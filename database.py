@@ -15,10 +15,10 @@ class Ticket(Base):
     report = Column(Text)
     author = Column(String)
     assigned_to = Column(String)
-    status = Column(String, default="Abierto")
+    status = Column(String, default="OPEN")
     created_at = Column(DateTime, default=datetime.utcnow)
-    veredicto = Column(Text, nullable=True)
-    planes_accion = Column(JSON, default=list)
+    verdict = Column(Text, nullable=True)
+    action_plans = Column(JSON, default=list)
     session_id = Column(String, nullable=True)
 
 class TicketThread(Base):
@@ -40,7 +40,7 @@ class Attachment(Base):
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
     id = Column(String, primary_key=True)
-    title = Column(String, default="Nueva conversación")
+    title = Column(String, default="New conversation")
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class Repository(Base):
@@ -53,11 +53,11 @@ def init_db():
     Base.metadata.create_all(engine)
     try:
         with engine.begin() as conn:
-            conn.execute(text("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS veredicto TEXT;"))
-            conn.execute(text("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS planes_accion JSON DEFAULT '[]'::json;"))
+            conn.execute(text("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS verdict TEXT;"))
+            conn.execute(text("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS action_plans JSON DEFAULT '[]'::json;"))
             conn.execute(text("CREATE TABLE IF NOT EXISTS repositories (id TEXT PRIMARY KEY, url TEXT, last_updated TIMESTAMP);"))
             conn.execute(text("ALTER TABLE attachments ADD COLUMN IF NOT EXISTS file_data BYTEA;"))
             conn.execute(text("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS session_id TEXT;"))
-            conn.execute(text("CREATE TABLE IF NOT EXISTS chat_sessions (id TEXT PRIMARY KEY, title TEXT DEFAULT 'Nueva conversación', created_at TIMESTAMP DEFAULT NOW());"))
+            conn.execute(text("CREATE TABLE IF NOT EXISTS chat_sessions (id TEXT PRIMARY KEY, title TEXT DEFAULT 'New conversation', created_at TIMESTAMP DEFAULT NOW());"))
     except Exception:
         pass

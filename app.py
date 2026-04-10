@@ -205,35 +205,35 @@ elif st.session_state.section == "Ticket Board":
                                         )
 
                     # Verdict
-                    if t.veredicto:
-                        st.success(f"⚖️ **Verdict:**\n\n{t.veredicto}")
+                    if t.verdict:
+                        st.success(f"⚖️ **Verdict:**\n\n{t.verdict}")
                     else:
                         st.warning("⚠️ No verdict yet. Generate an **Action Plan** to diagnose.")
 
                     # Action Plans with integrated buttons
                     st.markdown("#### 🗺️ Action Plans")
-                    planes = list(t.planes_accion) if t.planes_accion else []
+                    plans = list(t.action_plans) if t.action_plans else []
                     if t.status != "AWAITING_VALIDATION":
                         if st.button("⚡ Generate Action Plan", use_container_width=True, type="primary"):
-                            from agent_engine import diagnostico_fast_track
+                            from agent_engine import fast_track_diagnosis
                             with st.spinner("🧠 Analyzing with AI and generating plan..."):
-                                resultado = diagnostico_fast_track.invoke({"ticket_id": t_id})
+                                result = fast_track_diagnosis.invoke({"ticket_id": t_id})
                             st.success("Plan generated")
-                            st.info(resultado)
+                            st.info(result)
                             st.button("🔄 Reload view", key="reload_ft", on_click=lambda: st.rerun())
-                    if planes:
-                        for idx, p in enumerate(reversed(planes)):
+                    if plans:
+                        for idx, p in enumerate(reversed(plans)):
                             v_num = p.get('version', '?')
-                            with st.expander(f"Plan V{v_num} — {p.get('fecha', '')[:10]}", expanded=(idx == 0)):
-                                archivos_rev = p.get("archivos_revisados", [])
-                                hallazgos = p.get("hallazgos", [])
-                                if archivos_rev:
-                                    st.markdown(f"**📁 Files reviewed ({len(archivos_rev)}):**")
-                                    for a in archivos_rev:
+                            with st.expander(f"Plan V{v_num} — {p.get('date', p.get('fecha', ''))[:10]}", expanded=(idx == 0)):
+                                files_rev = p.get("files_reviewed", p.get("archivos_revisados", []))
+                                findings = p.get("findings", p.get("hallazgos", []))
+                                if files_rev:
+                                    st.markdown(f"**📁 Files reviewed ({len(files_rev)}):**")
+                                    for a in files_rev:
                                         st.code(a, language=None)
-                                if hallazgos:
-                                    st.markdown(f"**🔍 Findings ({len(hallazgos)}):**")
-                                    for i, h in enumerate(hallazgos, 1):
+                                if findings:
+                                    st.markdown(f"**🔍 Findings ({len(findings)}):**")
+                                    for i, h in enumerate(findings, 1):
                                         st.markdown(f"{i}. {h}")
                                 st.markdown("**📋 Plan:**")
                                 st.write(p.get("plan", "No details"))
@@ -245,18 +245,18 @@ elif st.session_state.section == "Ticket Board":
                                     btn_c1, btn_c2 = st.columns(2)
                                     with btn_c1:
                                         if st.button(f"🚀 Execute Plan V{v_num}", key=f"exec_plan_{v_num}", use_container_width=True, type="primary"):
-                                            from agent_engine import ejecutar_plan_accion
+                                            from agent_engine import execute_action_plan
                                             with st.spinner("🔧 Generating code on branch..."):
-                                                res_exec = ejecutar_plan_accion.invoke({"ticket_id": t_id})
+                                                res_exec = execute_action_plan.invoke({"ticket_id": t_id})
                                             if "Error" in res_exec:
                                                 db.add(TicketThread(id=str(uuid.uuid4()), ticket_id=t_id, author="SRE-Agent", content=f"**Error executing plan:** {res_exec}"))
                                                 db.commit()
                                             st.rerun()
                                     with btn_c2:
                                         if st.button(f"📬 Send PR V{v_num}", key=f"pr_plan_{v_num}", use_container_width=True):
-                                            from agent_engine import crear_pr_ticket
+                                            from agent_engine import create_pr_ticket
                                             with st.spinner("📬 Creating Pull Request..."):
-                                                res_pr = crear_pr_ticket.invoke({"ticket_id": t_id})
+                                                res_pr = create_pr_ticket.invoke({"ticket_id": t_id})
                                             if "Error" in res_pr:
                                                 db.add(TicketThread(id=str(uuid.uuid4()), ticket_id=t_id, author="SRE-Agent", content=f"**Error creating PR:** {res_pr}"))
                                                 db.commit()
@@ -264,10 +264,10 @@ elif st.session_state.section == "Ticket Board":
 
                 with c2:
                     st.markdown("#### 💬 History")
-                    hilos = db.query(TicketThread).filter(TicketThread.ticket_id == t_id).order_by(TicketThread.timestamp.asc()).all()
-                    if not hilos:
+                    threads = db.query(TicketThread).filter(TicketThread.ticket_id == t_id).order_by(TicketThread.timestamp.asc()).all()
+                    if not threads:
                         st.info("No activity yet.")
-                    for h in hilos:
+                    for h in threads:
                         with st.chat_message("assistant" if h.author == "SRE-Agent" else "user"):
                             st.caption(f"{h.author} — {h.timestamp.strftime('%Y-%m-%d %H:%M')}")
                             st.write(h.content)
@@ -283,7 +283,7 @@ elif st.session_state.section == "Ticket Board":
                 st.session_state.selected_ticket = None
         else:
             cols = st.columns(5)
-            statuses = [("Abierto", "OPEN"), ("IN_PROGRESS", "IN PROGRESS"), ("PENDING_NOTIF", "REVIEW"), ("AWAITING_VALIDATION", "VALIDATION"), ("RESOLVED", "RESOLVED")]
+            statuses = [("OPEN", "OPEN"), ("IN_PROGRESS", "IN PROGRESS"), ("PENDING_NOTIF", "REVIEW"), ("AWAITING_VALIDATION", "VALIDATION"), ("RESOLVED", "RESOLVED")]
             for i, (status_id, label) in enumerate(statuses):
                 with cols[i]:
                     st.markdown(f"### {label}")
@@ -331,9 +331,9 @@ elif st.session_state.section == "Knowledge Base":
     st.divider()
     st.markdown("#### 🔬 Vector Database Diagnostics (Qdrant)")
     if st.button("🩺 Inspect Qdrant", use_container_width=True):
-        from agent_engine import diagnosticar_qdrant
+        from agent_engine import diagnose_qdrant
         with st.spinner("Inspecting kb_sre collection..."):
-            diag = diagnosticar_qdrant()
+            diag = diagnose_qdrant()
 
         if not diag["collection_exists"]:
             st.error("❌ Collection `kb_sre` does NOT exist in Qdrant.")
@@ -342,11 +342,11 @@ elif st.session_state.section == "Knowledge Base":
         else:
             st.success(f"✅ Active collection: **{diag['total_points']} vectors** indexed")
 
-            archivos = diag.get("archivos", {})
-            if archivos:
-                st.markdown(f"**📁 Indexed files ({len(archivos)}):**")
-                for nombre, count in sorted(archivos.items(), key=lambda x: -x[1]):
-                    st.text(f"  {nombre} → {count} chunks")
+            files = diag.get("files", {})
+            if files:
+                st.markdown(f"**📁 Indexed files ({len(files)}):**")
+                for name, count in sorted(files.items(), key=lambda x: -x[1]):
+                    st.text(f"  {name} → {count} chunks")
             else:
                 st.warning("No file names found in metadata.")
 
