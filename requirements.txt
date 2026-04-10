@@ -6,7 +6,7 @@ qdrant-client
 langchain-qdrant
 arize-phoenix
 openinference-instrumentation-langchain
-streamlit>=1.43.0
+streamlit>=1.56.0
 psycopg2-binary
 SQLAlchemy
 pandas
