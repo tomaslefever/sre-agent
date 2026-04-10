@@ -11,10 +11,12 @@ init_db()
 
 st.set_page_config(page_title="AgentX: SRE & Ticketing", page_icon="🎫", layout="wide")
 st.markdown("""<style>
-    .block-container { padding-top: 1rem; padding-bottom: 5rem; }
+    .block-container { padding-top: 1rem; }
     [data-testid="stSidebar"] > div:first-child { padding-top: 1rem; }
     header[data-testid="stHeader"] { display: none; }
-    [data-testid="stBottom"] { position: fixed; bottom: 0; width: 100%; z-index: 999; }
+    textarea { max-width: 100% !important; box-sizing: border-box !important; }
+    .stTextArea > div > div > textarea { width: 100% !important; }
+    iframe { max-width: 100% !important; }
 </style>""", unsafe_allow_html=True)
 
 if "session_id" not in st.session_state:
