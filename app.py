@@ -140,14 +140,29 @@ elif st.session_state.seccion == "Tablero de Tickets":
                 with c1:
                     with st.expander("📝 Reporte Original", expanded=True):
                         st.write(t.report)
+                    
+                    # Veredicto
                     if t.veredicto:
-                        st.success(f"⚖️ **Veredicto:**\n{t.veredicto}")
+                        st.success(f"⚖️ **Veredicto:**\n\n{t.veredicto}")
+                    else:
+                        st.warning("⚠️ Sin veredicto aún. Ejecuta un **Fast-Track IA** para diagnosticar.")
+                    
+                    # Planes de Acción
+                    planes = list(t.planes_accion) if t.planes_accion else []
+                    if planes:
+                        st.markdown("#### 🗺️ Planes de Acción")
+                        for p in reversed(planes):
+                            with st.expander(f"Plan V{p.get('version', '?')} — {p.get('fecha', '')[:10]}", expanded=(p == planes[-1])):
+                                st.write(p.get("plan", "Sin detalle"))
+                    
                     st.divider()
                     st.markdown("#### 💬 Historial y Comentarios")
                     hilos = db.query(TicketThread).filter(TicketThread.ticket_id == t_id).order_by(TicketThread.timestamp.asc()).all()
+                    if not hilos:
+                        st.info("Sin comentarios aún.")
                     for h in hilos:
                         with st.chat_message("assistant" if h.author == "SRE-Agent" else "user"):
-                            st.caption(f"{h.author} - {h.timestamp.strftime('%Y-%m-%d %H:%M')}")
+                            st.caption(f"{h.author} — {h.timestamp.strftime('%Y-%m-%d %H:%M')}")
                             st.write(h.content)
                     with st.form(key=f"form_hilo_{t_id}", clear_on_submit=True):
                         nuevo_txt = st.text_area("Añadir comentario...")
@@ -158,16 +173,27 @@ elif st.session_state.seccion == "Tablero de Tickets":
                                 st.rerun()
                 with c2:
                     st.markdown("#### ⚙️ Gestión de Incidente")
+                    
                     if st.button("⚡ Fast-Track IA", use_container_width=True):
                         from agent_engine import diagnostico_fast_track
-                        res = diagnostico_fast_track.invoke({"ticket_id": t_id})
-                        st.toast(res)
-                        st.rerun()
+                        with st.spinner("🧠 Analizando con IA..."):
+                            resultado = diagnostico_fast_track.invoke({"ticket_id": t_id})
+                        st.success("Diagnóstico completado")
+                        st.info(resultado)
+                        st.button("🔄 Recargar vista", on_click=lambda: st.rerun())
+                    
                     if st.button("🚀 Ejecutar Plan", use_container_width=True, type="primary"):
                         from agent_engine import ejecutar_plan_accion
-                        res = ejecutar_plan_accion.invoke({"ticket_id": t_id})
-                        st.toast(res)
-                        st.rerun()
+                        with st.spinner("Ejecutando plan..."):
+                            resultado = ejecutar_plan_accion.invoke({"ticket_id": t_id})
+                        st.success(resultado)
+                        st.button("🔄 Recargar vista", key="reload_plan", on_click=lambda: st.rerun())
+                    
+                    if t.status not in ("RESOLVED", "Resuelto"):
+                        if st.button("✅ Marcar como Resuelto", use_container_width=True):
+                            t.status = "RESOLVED"
+                            db.commit()
+                            st.rerun()
             else:
                 st.session_state.selected_ticket = None
         else:

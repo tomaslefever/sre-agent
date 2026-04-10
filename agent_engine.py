@@ -114,29 +114,79 @@ def generar_plan_accion(ticket_id: str, nuevo_plan: str) -> str:
 
 @tool
 def diagnostico_fast_track(ticket_id: str) -> str:
-    """Diagnóstico rápido."""
+    """Ruta rapida: Busca 10 chunks en Qdrant, genera diagnostico + plan en una sola pasada con GPT-4o."""
+    import json
+    from langchain_core.messages import SystemMessage, HumanMessage
+    
     db = SessionLocal()
     t = db.query(Ticket).filter(Ticket.id == ticket_id).first()
     if not t:
         db.close()
-        return "No encontrado."
-    fast_llm = ChatOpenAI(model="gpt-4o", temperature=0)
+        return "Ticket no encontrado."
+    
+    # 1. Buscar contexto
     v_store = get_vector_store()
     ctx = v_store.as_retriever(search_kwargs={"k": 10}).invoke(t.report)
-    prompt = f"Analiza: {t.report}\nContexto: {' '.join([d.page_content for d in ctx])}\nResponde JSON."
-    res = fast_llm.invoke(prompt)
+    context_text = "\n---\n".join([d.page_content for d in ctx]) if ctx else "Sin contexto disponible en la base de conocimiento."
+    
+    # 2. Prompt estructurado
+    fast_llm = ChatOpenAI(model="gpt-4o", temperature=0)
+    messages = [
+        SystemMessage(content="Eres un Ingeniero SRE Senior experto en diagnostico rapido de incidentes. Siempre respondes en JSON valido."),
+        HumanMessage(content=f"""Analiza este incidente usando el contexto del codigo/documentacion adjunto.
+
+INCIDENTE REPORTADO:
+{t.report}
+
+CONTEXTO DE LA BASE DE CONOCIMIENTO:
+{context_text}
+
+Responde UNICAMENTE con un JSON valido con estas dos claves:
+{{
+  "veredicto": "Explicacion tecnica detallada de la causa raiz del problema",
+  "plan": "Pasos numerados y concretos para resolver el incidente"
+}}""")
+    ]
+    
     try:
-        import json
-        data = json.loads(res.content.replace("```json", "").replace("```", "").strip())
-        t.veredicto = data["veredicto"]
+        res = fast_llm.invoke(messages)
+        raw = res.content.replace("```json", "").replace("```", "").strip()
+        data = json.loads(raw)
+        
+        veredicto = data.get("veredicto", "No se pudo determinar la causa raiz.")
+        plan = data.get("plan", "No se pudo generar un plan.")
+        
+        # Guardar en DB
+        t.veredicto = veredicto
         planes = list(t.planes_accion) if t.planes_accion else []
-        planes.append({"version": len(planes)+1, "plan": data["plan"], "fecha": datetime.utcnow().isoformat()})
+        nueva_v = len(planes) + 1
+        planes.append({
+            "version": nueva_v,
+            "plan": plan,
+            "fecha": datetime.utcnow().isoformat()
+        })
         t.planes_accion = planes
+        t.status = "IN_PROGRESS"
+        
+        # Registrar en hilo
+        db.add(TicketThread(
+            id=str(uuid.uuid4()),
+            ticket_id=ticket_id,
+            author="SRE-Agent",
+            content=f"**Fast-Track completado**\n\n**Veredicto:** {veredicto}\n\n**Plan V{nueva_v}:** {plan}"
+        ))
         db.commit()
-    except:
-        pass
-    db.close()
-    return "Fast-Track OK"
+        db.close()
+        
+        return f"VEREDICTO: {veredicto}\n\nPLAN DE ACCION (V{nueva_v}): {plan}"
+    
+    except json.JSONDecodeError as e:
+        db.close()
+        return f"Error: El LLM no devolvio JSON valido. Respuesta raw: {res.content[:500]}"
+    except Exception as e:
+        db.close()
+        return f"Error en Fast-Track: {str(e)}"
+
 
 @tool
 def ejecutar_plan_accion(ticket_id: str) -> str:
