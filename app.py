@@ -93,38 +93,36 @@ if st.session_state.section == "Incident Center":
         with st.chat_message(role):
             st.markdown(msg.content)
 
-    from streamlit_chat_prompt import prompt as chat_prompt
-
-    response = chat_prompt(
-        name="incident_chat",
-        key="incident_chat",
-        placeholder="Describe the incident or paste a screenshot (Ctrl+V)...",
-        main_bottom=True,
+    u_input = st.chat_input(
+        "Describe the incident or drop a file...",
+        accept_file="multiple"
     )
-    if response:
-        text = response.text or ""
-        images = response.images or []
+    if u_input:
+        text = u_input.text or ""
+        all_files = list(u_input.files or [])
 
-        # Phase 1: Pre-process images (already base64)
+        # Phase 1: Pre-process files
         image_descriptions = []
+        file_texts = []
         display_images = []
 
-        for i, img in enumerate(images):
-            img_name = f"image_{i+1}.png"
-            img_b64 = img.data
-            mime_type = img.type or "image/png"
-            try:
-                img_bytes = base64.b64decode(img_b64)
-            except Exception:
-                img_bytes = None
-            if img_bytes:
-                display_images.append((img_name, img_bytes, mime_type))
-            try:
-                from agent_engine import analyze_image_with_vision
-                desc = analyze_image_with_vision(img_b64, mime_type, text)
-                image_descriptions.append(f"[VISUAL ANALYSIS of '{img_name}']:\n{desc}")
-            except Exception as e:
-                image_descriptions.append(f"[ERROR analyzing image '{img_name}': {str(e)}]")
+        for f in all_files:
+            f_bytes = f.read()
+            if f.type and f.type.startswith("image/"):
+                img_b64 = base64.b64encode(f_bytes).decode()
+                display_images.append((f.name, f_bytes, f.type))
+                try:
+                    from agent_engine import analyze_image_with_vision
+                    desc = analyze_image_with_vision(img_b64, f.type, text)
+                    image_descriptions.append(f"[VISUAL ANALYSIS of '{f.name}']:\n{desc}")
+                except Exception as e:
+                    image_descriptions.append(f"[ERROR analyzing image '{f.name}': {str(e)}]")
+            else:
+                try:
+                    txt = f_bytes.decode("utf-8")
+                    file_texts.append(f"[CONTENT of '{f.name}']:\n{txt}")
+                except:
+                    file_texts.append(f"[FILE '{f.name}' attached (binary, not readable)]")
 
         # Phase 2: Build full input for the agent
         parts = []
@@ -132,6 +130,8 @@ if st.session_state.section == "Incident Center":
             parts.append(text)
         for desc in image_descriptions:
             parts.append(desc)
+        for ft in file_texts:
+            parts.append(ft)
         if not parts:
             parts.append("The user attached files without additional message.")
 
@@ -143,6 +143,8 @@ if st.session_state.section == "Incident Center":
                 st.markdown(text)
             for name, img_bytes, mime in display_images:
                 st.image(img_bytes, caption=f"📷 {name}")
+            for ft in file_texts:
+                st.caption("📎 File attached")
 
         # Save/update session
         _sdb2 = SessionLocal()
